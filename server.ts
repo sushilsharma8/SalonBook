@@ -178,9 +178,8 @@ async function createBooking(prisma: PrismaClient, data: any) {
   });
 }
 
-async function startServer() {
+export async function createApp() {
   const app = express();
-  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json());
@@ -701,9 +700,17 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const PORT = 3000;
+  const app = await createApp();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer().catch(console.error);
+if (process.env.VERCEL !== '1') {
+  startServer().catch(console.error);
+}
