@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
@@ -160,7 +159,7 @@ async function createBooking(prisma: PrismaClient, data: any) {
         startTime: new Date(startTime),
         endTime,
         totalAmount,
-        status: 'PENDING',
+        status: 'CONFIRMED',
         paymentStatus: 'PENDING',
         services: {
           create: serviceIds.map((id: string) => ({
@@ -267,7 +266,10 @@ async function startServer() {
           reviews: {
             include: { user: { select: { name: true } } },
             orderBy: { createdAt: 'desc' }
-          } 
+          },
+          owner: {
+            select: { name: true, phone: true }
+          }
         }
       });
       if (!salon) return res.status(404).json({ error: 'Salon not found' });
@@ -422,68 +424,19 @@ async function startServer() {
     }
   });
 
-  // Payments
-  app.post('/api/payments/create-order', requireAuth, async (req: Request, res: Response) => {
-    if (req.user.role !== 'CUSTOMER') return res.status(403).json({ error: 'Forbidden' });
-    const { amount } = req.body;
-    try {
-      const razorpay = new Razorpay({
-        key_id: process.env.RAZORPAY_KEY_ID || 'dummy_key_id',
-        key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_key_secret',
-      });
-
-      const order = await razorpay.orders.create({
-        amount: Math.round(amount * 100),
-        currency: "INR",
-      });
-      res.json({ ...order, key_id: process.env.RAZORPAY_KEY_ID });
-    } catch (error: any) {
-      console.error("Razorpay order creation error:", error);
-      res.status(500).json({ error: 'Failed to create order' });
-    }
-  });
-
-  app.post('/api/payments/verify', requireAuth, async (req: Request, res: Response) => {
-    if (req.user.role !== 'CUSTOMER') return res.status(403).json({ error: 'Forbidden' });
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingId, amount } = req.body;
-    try {
-      const expected = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || 'dummy_key_secret')
-        .update(razorpay_order_id + "|" + razorpay_payment_id)
-        .digest("hex");
-
-      if (expected === razorpay_signature) {
-        // Payment verified, create payment record
-        const payment = await prisma.payment.create({
-          data: {
-            bookingId,
-            amount,
-            fee: 0,
-            status: 'SUCCESS',
-            razorpayId: razorpay_payment_id
-          }
-        });
-        
-        // Update booking payment status
-        await prisma.booking.update({
-          where: { id: bookingId },
-          data: { paymentStatus: 'PAID', status: 'CONFIRMED' }
-        });
-
-        res.json({ success: true, payment });
-      } else {
-        res.status(400).json({ error: 'Invalid signature' });
-      }
-    } catch (error: any) {
-      res.status(500).json({ error: 'Payment verification failed' });
-    }
-  });
-
   app.get('/api/bookings/my', requireAuth, async (req: Request, res: Response) => {
     try {
       const bookings = await prisma.booking.findMany({
         where: { userId: req.user.userId },
-        include: { salon: true, services: { include: { service: true } }, staff: true },
+        include: { 
+          salon: {
+            include: {
+              owner: { select: { name: true, phone: true } }
+            }
+          }, 
+          services: { include: { service: true } }, 
+          staff: true 
+        },
         orderBy: { startTime: 'desc' }
       });
       

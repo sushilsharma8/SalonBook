@@ -25,6 +25,7 @@ async function main() {
     data: {
       name: 'System Admin',
       email: 'admin@example.com',
+      phone: '9070600540',
       password: hashedPassword,
       role: 'ADMIN',
     },
@@ -35,6 +36,7 @@ async function main() {
     data: {
       name: 'John Salon Owner',
       email: 'seller1@example.com',
+      phone: '9070600540',
       password: hashedPassword,
       role: 'SELLER',
     },
@@ -44,6 +46,7 @@ async function main() {
     data: {
       name: 'Jane Beauty Expert',
       email: 'seller2@example.com',
+      phone: '9070600540',
       password: hashedPassword,
       role: 'SELLER',
     },
@@ -170,6 +173,7 @@ async function main() {
     data: {
       name: 'Alice Cooper',
       email: 'customer1@example.com',
+      phone: '9070600540',
       password: hashedPassword,
       role: 'CUSTOMER',
     },
@@ -179,6 +183,7 @@ async function main() {
     data: {
       name: 'Bob Marley',
       email: 'customer2@example.com',
+      phone: '9070600540',
       password: hashedPassword,
       role: 'CUSTOMER',
     },

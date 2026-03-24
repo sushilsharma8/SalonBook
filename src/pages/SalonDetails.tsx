@@ -68,16 +68,6 @@ export default function SalonDetails() {
     fetchSlots();
   }, [salon, selectedServices, selectedStaff, selectedDate]);
 
-  const loadRazorpay = () => {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
-
   const handleBook = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -93,11 +83,6 @@ export default function SalonDetails() {
 
     setBookingLoading(true);
     try {
-      const isRazorpayLoaded = await loadRazorpay();
-      if (!isRazorpayLoaded) {
-        throw new Error('Razorpay SDK failed to load');
-      }
-
       const totalAmount = selectedServices.reduce((acc, s) => acc + s.price, 0);
 
       // Combine date and time in UTC format to avoid timezone issues
@@ -124,70 +109,8 @@ export default function SalonDetails() {
       const bookingData = await res.json();
       if (!res.ok) throw new Error(bookingData.error);
       
-      // 2. Create Razorpay Order
-      const amountToPay = totalAmount * 0.4; // 40% upfront
-      const orderRes = await fetch('/api/payments/create-order', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          amount: amountToPay
-        }),
-      });
-      const orderData = await orderRes.json();
-      if (!orderRes.ok) throw new Error(orderData.error);
-
-      // 3. Open Razorpay Checkout
-      const options = {
-        key: orderData.key_id || 'dummy_key_id', // Use the key_id from the server response
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: salon.name,
-        description: `Booking for ${selectedServices.map(s => s.name).join(', ')}`,
-        order_id: orderData.id,
-        handler: async function (response: any) {
-          try {
-            // 4. Verify Payment
-            const verifyRes = await fetch('/api/payments/verify', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                bookingId: bookingData.id,
-                amount: amountToPay
-              }),
-            });
-            
-            if (!verifyRes.ok) throw new Error('Payment verification failed');
-            
-            setSuccessMessage('Booking successful! Redirecting to dashboard...');
-            setTimeout(() => navigate('/dashboard/customer'), 2000);
-          } catch (err: any) {
-            setErrorMessage(err.message || 'Payment verification failed');
-          }
-        },
-        prefill: {
-          name: user.name,
-          email: user.email || ''
-        },
-        theme: {
-          color: '#1c1917' // stone-900
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
-        setErrorMessage(response.error.description || 'Payment failed');
-      });
-      rzp.open();
-
+      setSuccessMessage('Booking successful! You can pay at the shop directly.');
+      
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred during booking');
     } finally {
@@ -476,32 +399,56 @@ export default function SalonDetails() {
                   </div>
                   <p className="text-[10px] md:text-xs text-stone-500 flex items-center">
                     <CreditCard className="w-3 h-3 mr-1.5" />
-                    Pay 40% upfront to confirm booking
+                    Pay at shop directly
                   </p>
                 </div>
 
                 {errorMessage && (
-                  <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100">
+                  <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100 mb-4">
                     {errorMessage}
                   </div>
                 )}
-                {successMessage && (
-                  <div className="p-4 bg-green-50 text-green-600 rounded-xl text-sm border border-green-100">
-                    {successMessage}
-                  </div>
-                )}
 
-                <button
-                  onClick={handleBook}
-                  disabled={!selectedTime || bookingLoading || (user && user.role !== 'CUSTOMER')}
-                  className="w-full bg-stone-900 text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                >
-                  {bookingLoading ? 'Processing...' : (user && user.role !== 'CUSTOMER' ? 'Booking Restricted' : 'Book Appointment')}
-                </button>
-                {user && user.role !== 'CUSTOMER' && (
-                  <p className="text-xs text-red-500 text-center font-medium">
-                    Only customer accounts can book services.
-                  </p>
+                {successMessage ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-green-50 text-green-700 rounded-xl text-sm border border-green-200 font-medium text-center">
+                      {successMessage}
+                    </div>
+                    
+                    {salon.owner?.phone && (
+                      <a 
+                        href={`https://wa.me/${salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + salon.owner.phone.replace(/\D/g, '') : salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${salon.owner.name}, I just booked an appointment at ${salon.name} for ${format(selectedDate, 'MMM d, yyyy')} at ${selectedTime}.`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center space-x-2 bg-[#25D366] text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-[#128C7E] transition-colors shadow-sm"
+                      >
+                        <svg className="w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                        <span>Notify Seller on WhatsApp</span>
+                      </a>
+                    )}
+                    
+                    <button
+                      onClick={() => navigate('/dashboard/customer')}
+                      className="w-full bg-stone-100 text-stone-900 py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-200 transition-colors shadow-sm"
+                    >
+                      Go to Dashboard
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleBook}
+                      disabled={!selectedTime || bookingLoading || (user && user.role !== 'CUSTOMER')}
+                      className="w-full bg-stone-900 text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    >
+                      {bookingLoading ? 'Processing...' : (user && user.role !== 'CUSTOMER' ? 'Booking Restricted' : 'Book Appointment')}
+                    </button>
+                    {user && user.role !== 'CUSTOMER' && (
+                      <p className="text-xs text-red-500 text-center font-medium mt-2">
+                        Only customer accounts can book services.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             )}

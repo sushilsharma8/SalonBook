@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('CUSTOMER');
   const [error, setError] = useState('');
@@ -17,7 +18,7 @@ export default function Register() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, role }),
+        body: JSON.stringify({ name, email, phone, password, role }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -53,6 +54,17 @@ export default function Register() {
               className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50"
               value={email} 
               onChange={e => setEmail(e.target.value)} 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-stone-700 mb-2">Phone Number</label>
+            <input 
+              type="tel" 
+              required 
+              className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50"
+              value={phone} 
+              onChange={e => setPhone(e.target.value)} 
+              placeholder="e.g. 919876543210"
             />
           </div>
           <div>
