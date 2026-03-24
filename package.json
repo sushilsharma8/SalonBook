@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "vercel-build": "prisma generate && npm run build",
     "start": "node --experimental-strip-types server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
