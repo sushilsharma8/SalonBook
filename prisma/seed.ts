@@ -28,6 +28,7 @@ async function main() {
       phone: '9070600540',
       password: hashedPassword,
       role: 'ADMIN',
+      gender: 'OTHER',
     },
   });
 
@@ -39,6 +40,7 @@ async function main() {
       phone: '9070600540',
       password: hashedPassword,
       role: 'SELLER',
+      gender: 'MALE',
     },
   });
 
@@ -49,6 +51,7 @@ async function main() {
       phone: '9070600540',
       password: hashedPassword,
       role: 'SELLER',
+      gender: 'FEMALE',
     },
   });
 
@@ -83,31 +86,65 @@ async function main() {
 
   // 4. Create Services
   const serviceData1 = [
-    { name: 'Men\'s Haircut', price: 40, duration: 30 },
-    { name: 'Women\'s Haircut', price: 65, duration: 60 },
-    { name: 'Hair Coloring', price: 120, duration: 120 },
-    { name: 'Beard Trim', price: 25, duration: 20 },
+    {
+      name: 'Haircut',
+      variants: [
+        { targetGender: 'MALE' as const, price: 40, duration: 30 },
+        { targetGender: 'FEMALE' as const, price: 65, duration: 60 },
+        { targetGender: 'UNISEX' as const, price: 50, duration: 45 },
+      ],
+    },
+    {
+      name: 'Hair Coloring',
+      variants: [{ targetGender: 'UNISEX' as const, price: 120, duration: 120 }],
+    },
+    {
+      name: 'Beard Trim',
+      variants: [{ targetGender: 'MALE' as const, price: 25, duration: 20 }],
+    },
   ];
 
   const services1 = [];
   for (const s of serviceData1) {
     const service = await prisma.service.create({
-      data: { ...s, salonId: salon1.id },
+      data: {
+        name: s.name,
+        salonId: salon1.id,
+        variants: { create: s.variants },
+      },
+      include: { variants: true },
     });
     services1.push(service);
   }
 
   const serviceData2 = [
-    { name: 'Full Body Massage', price: 100, duration: 60 },
-    { name: 'Deep Tissue Massage', price: 130, duration: 90 },
-    { name: 'Hydra Facial', price: 150, duration: 45 },
-    { name: 'Manicure & Pedicure', price: 80, duration: 75 },
+    {
+      name: 'Full Body Massage',
+      variants: [{ targetGender: 'UNISEX' as const, price: 100, duration: 60 }],
+    },
+    {
+      name: 'Deep Tissue Massage',
+      variants: [{ targetGender: 'UNISEX' as const, price: 130, duration: 90 }],
+    },
+    {
+      name: 'Hydra Facial',
+      variants: [{ targetGender: 'UNISEX' as const, price: 150, duration: 45 }],
+    },
+    {
+      name: 'Manicure & Pedicure',
+      variants: [{ targetGender: 'UNISEX' as const, price: 80, duration: 75 }],
+    },
   ];
 
   const services2 = [];
   for (const s of serviceData2) {
     const service = await prisma.service.create({
-      data: { ...s, salonId: salon2.id },
+      data: {
+        name: s.name,
+        salonId: salon2.id,
+        variants: { create: s.variants },
+      },
+      include: { variants: true },
     });
     services2.push(service);
   }
@@ -176,6 +213,7 @@ async function main() {
       phone: '9070600540',
       password: hashedPassword,
       role: 'CUSTOMER',
+      gender: 'FEMALE',
     },
   });
 
@@ -186,6 +224,7 @@ async function main() {
       phone: '9070600540',
       password: hashedPassword,
       role: 'CUSTOMER',
+      gender: 'MALE',
     },
   });
 

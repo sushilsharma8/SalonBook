@@ -13,7 +13,6 @@ export default function SalonDetails() {
   
   // Booking state
   const [selectedServices, setSelectedServices] = useState<any[]>([]);
-  const [selectedStaff, setSelectedStaff] = useState<any>(null);
   const [selectedDate, setSelectedDate] = useState<Date>(startOfToday());
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [bookingLoading, setBookingLoading] = useState(false);
@@ -21,6 +20,14 @@ export default function SalonDetails() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const getEffectiveVariant = (service: any) => {
+    const variants = service.variants || [];
+    const genderTarget = user?.gender === 'FEMALE' ? 'FEMALE' : user?.gender === 'MALE' ? 'MALE' : null;
+    const exact = genderTarget ? variants.find((v: any) => v.targetGender === genderTarget) : null;
+    const unisex = variants.find((v: any) => v.targetGender === 'UNISEX');
+    return exact || unisex || variants[0] || null;
+  };
 
   useEffect(() => {
     fetch(`/api/salons/${id}`)
@@ -40,7 +47,7 @@ export default function SalonDetails() {
   }, [id]);
 
   useEffect(() => {
-    if (!salon || selectedServices.length === 0 || !selectedStaff || !selectedDate) {
+    if (!salon || selectedServices.length === 0 || !selectedDate || !token || user?.role !== 'CUSTOMER') {
       setTimeSlots([]);
       return;
     }
@@ -50,7 +57,9 @@ export default function SalonDetails() {
       try {
         const serviceIds = selectedServices.map(s => s.id).join(',');
         const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const res = await fetch(`/api/slots?salonId=${salon.id}&serviceIds=${serviceIds}&staffId=${selectedStaff.id}&date=${dateStr}`);
+        const res = await fetch(`/api/slots?salonId=${salon.id}&serviceIds=${serviceIds}&date=${dateStr}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
         const data = await res.json();
         if (res.ok) {
           setTimeSlots(data.slots || []);
@@ -66,7 +75,7 @@ export default function SalonDetails() {
     };
 
     fetchSlots();
-  }, [salon, selectedServices, selectedStaff, selectedDate]);
+  }, [salon, selectedServices, selectedDate, token, user?.role]);
 
   const handleBook = async () => {
     setErrorMessage(null);
@@ -79,12 +88,10 @@ export default function SalonDetails() {
       setErrorMessage('Only customers can book services. Please log in with a customer account.');
       return;
     }
-    if (!selectedServices.length || !selectedStaff || !selectedTime) return;
+    if (!selectedServices.length || !selectedTime) return;
 
     setBookingLoading(true);
     try {
-      const totalAmount = selectedServices.reduce((acc, s) => acc + s.price, 0);
-
       // Combine date and time in UTC format to avoid timezone issues
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       const timeStr = `${selectedTime}:00.000Z`;
@@ -100,9 +107,8 @@ export default function SalonDetails() {
         body: JSON.stringify({
           salonId: salon.id,
           serviceIds: selectedServices.map(s => s.id),
-          staffId: selectedStaff.id,
           time: bookingTimeStr,
-          totalAmount: totalAmount
+          totalAmount: 0
         }),
       });
       
@@ -134,7 +140,7 @@ export default function SalonDetails() {
   const dates = Array.from({ length: 7 }).map((_, i) => addDays(startOfToday(), i));
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-24 lg:pb-8">
+    <div className="max-w-6xl mx-auto space-y-8 pb-24 lg:pb-8">
       {/* Mobile Floating Book Button */}
       {selectedServices.length === 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 lg:hidden w-full px-6">
@@ -153,7 +159,7 @@ export default function SalonDetails() {
         <div className="h-56 md:h-80 overflow-hidden bg-stone-100">
           <img src={images[0]} alt={salon.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
         </div>
-        <div className="p-6 md:p-10">
+        <div className="p-6 md:p-10 bg-gradient-to-b from-white to-stone-50/70">
           <h1 className="text-2xl md:text-5xl font-bold text-stone-900 mb-6 font-display tracking-tight">{salon.name}</h1>
           <div className="flex flex-wrap gap-3 md:gap-6 text-stone-600">
             <div className="flex items-center space-x-2 bg-stone-50 px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-stone-100 text-sm md:text-base">
@@ -172,11 +178,16 @@ export default function SalonDetails() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Left Column: Services & Staff & Reviews */}
         <div className="lg:col-span-2 space-y-8">
           <div id="services-section" className="bg-white p-6 md:p-10 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-stone-200/60">
-            <h2 className="text-xl md:text-3xl font-bold text-stone-900 mb-6 md:mb-8 font-display tracking-tight">Services</h2>
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <h2 className="text-xl md:text-3xl font-bold text-stone-900 font-display tracking-tight">Services</h2>
+              <span className="text-xs md:text-sm font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-stone-100 border border-stone-200 text-stone-600">
+                {salon.services.length} listed
+              </span>
+            </div>
             <div className="space-y-4">
               {salon.services.map((service: any) => {
                 const isSelected = selectedServices.some(s => s.id === service.id);
@@ -189,80 +200,35 @@ export default function SalonDetails() {
                     } else {
                       setSelectedServices(prev => [...prev, service]);
                     }
-                    setSelectedStaff(null);
                     setSelectedTime('');
                     // On mobile, scroll to staff selection
                     if (!isSelected && window.innerWidth < 1024) {
+                      // staff selection removed; scroll to booking widget
                       setTimeout(() => {
-                        document.getElementById('staff-section')?.scrollIntoView({ behavior: 'smooth' });
+                        document.getElementById('booking-section')?.scrollIntoView({ behavior: 'smooth' });
                       }, 100);
                     }
                   }}
                   className={`p-4 md:p-5 rounded-2xl border-2 cursor-pointer transition-all flex justify-between items-center ${
                     isSelected 
-                      ? 'border-stone-900 bg-stone-50' 
-                      : 'border-stone-100 hover:border-stone-300'
+                      ? 'border-stone-900 bg-stone-50 shadow-sm' 
+                      : 'border-stone-100 hover:border-stone-300 hover:shadow-sm'
                   }`}
                 >
                   <div>
                     <h3 className="font-bold text-stone-900 text-base md:text-lg">{service.name}</h3>
-                    <p className="text-xs md:text-sm text-stone-500 mt-1">{service.duration} mins</p>
+                    <p className="text-xs md:text-sm text-stone-500 mt-1">
+                      {getEffectiveVariant(service)?.duration ? `${getEffectiveVariant(service)?.duration} mins` : 'Duration depends on profile'}
+                    </p>
                   </div>
                   <div className="font-bold text-stone-900 text-lg md:text-xl">
-                    ₹{service.price}
+                    {getEffectiveVariant(service)?.price ? `₹${getEffectiveVariant(service)?.price}` : 'Profile based'}
                   </div>
                 </div>
               )})}
               {salon.services.length === 0 && <p className="text-stone-500">No services available.</p>}
             </div>
           </div>
-
-          {selectedServices.length > 0 && (
-            <div id="staff-section" className="bg-white p-6 md:p-10 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-stone-200/60 animate-in fade-in slide-in-from-bottom-4">
-              <h2 className="text-xl md:text-3xl font-bold text-stone-900 mb-6 md:mb-8 font-display tracking-tight">Select Professional</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4">
-                {salon.staff
-                  .filter((staff: any) => 
-                    selectedServices.every(service => 
-                      staff.services?.some((ss: any) => ss.serviceId === service.id)
-                    )
-                  ).length === 0 ? (
-                    <div className="col-span-full text-center py-8 text-stone-500 bg-stone-50 rounded-2xl border border-dashed border-stone-200">
-                      No professional provides all the selected services. Please reduce your selection.
-                    </div>
-                  ) : salon.staff
-                  .filter((staff: any) => 
-                    selectedServices.every(service => 
-                      staff.services?.some((ss: any) => ss.serviceId === service.id)
-                    )
-                  )
-                  .map((staff: any) => (
-                  <div 
-                    key={staff.id}
-                    onClick={() => {
-                      setSelectedStaff(staff);
-                      // On mobile, scroll to booking widget
-                      if (window.innerWidth < 1024) {
-                        setTimeout(() => {
-                          document.getElementById('booking-section')?.scrollIntoView({ behavior: 'smooth' });
-                        }, 100);
-                      }
-                    }}
-                    className={`p-4 md:p-6 rounded-2xl border-2 cursor-pointer text-center transition-all ${
-                      selectedStaff?.id === staff.id 
-                        ? 'border-stone-900 bg-stone-50' 
-                        : 'border-stone-100 hover:border-stone-300'
-                    }`}
-                  >
-                    <div className="w-16 h-16 md:w-20 md:h-20 mx-auto bg-stone-100 rounded-full mb-3 md:mb-4 overflow-hidden border-2 border-white shadow-sm">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${staff.name}`} alt={staff.name} />
-                    </div>
-                    <h3 className="font-bold text-stone-900 text-sm md:text-base">{staff.name}</h3>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Reviews Section */}
           {salon.reviews && salon.reviews.length > 0 && (
@@ -309,18 +275,28 @@ export default function SalonDetails() {
         {/* Right Column: Booking Widget */}
         <div id="booking-section" className="lg:col-span-1 scroll-mt-24">
           <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-stone-200/60 sticky top-24">
-            <h2 className="text-lg md:text-2xl font-bold text-stone-900 mb-6 md:mb-8 font-display tracking-tight">Book Appointment</h2>
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <h2 className="text-lg md:text-2xl font-bold text-stone-900 font-display tracking-tight">Book Appointment</h2>
+              {selectedServices.length > 0 && (
+                <span className="text-xs font-bold uppercase tracking-wider bg-stone-100 text-stone-700 px-3 py-1.5 rounded-full border border-stone-200">
+                  {selectedServices.length} selected
+                </span>
+              )}
+            </div>
             
             {selectedServices.length === 0 ? (
               <div className="text-center py-10 md:py-12 text-stone-500 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm md:text-base">
                 Please select at least one service first
               </div>
-            ) : !selectedStaff ? (
-              <div className="text-center py-10 md:py-12 text-stone-500 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm md:text-base">
-                Please select a professional
-              </div>
             ) : (
               <div className="space-y-6 md:space-y-8 animate-in fade-in">
+                <div className="flex flex-wrap gap-2">
+                  {selectedServices.map((service: any) => (
+                    <span key={service.id} className="text-xs font-semibold text-stone-700 bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-full">
+                      {service.name}
+                    </span>
+                  ))}
+                </div>
                 {/* Date Selection */}
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-4 flex items-center">
@@ -380,22 +356,31 @@ export default function SalonDetails() {
                 </div>
 
                 {/* Summary */}
-                <div className="bg-stone-50 p-5 md:p-6 rounded-2xl border border-stone-200/60">
+                <div className="bg-gradient-to-b from-stone-50 to-white p-5 md:p-6 rounded-2xl border border-stone-200/60">
+                  {!user?.gender && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                      Please set your gender in profile to see final pricing and continue booking.
+                    </p>
+                  )}
                   <div className="mb-4">
                     {selectedServices.map(s => (
                       <div key={s.id} className="flex justify-between mb-2">
                         <span className="text-stone-600 font-medium text-sm md:text-base">{s.name}</span>
-                        <span className="font-bold text-stone-900 text-sm md:text-base">₹{s.price}</span>
+                        <span className="font-bold text-stone-900 text-sm md:text-base">
+                          ₹{getEffectiveVariant(s)?.price ?? 0}
+                        </span>
                       </div>
                     ))}
                   </div>
                   <div className="flex justify-between text-xs md:text-sm text-stone-500 mb-4 md:mb-6 pb-4 md:pb-6 border-b border-stone-200">
-                    <span>With {selectedStaff.name}</span>
-                    <span>{selectedServices.reduce((acc, s) => acc + s.duration, 0)} min</span>
+                    <span>With assigned professional</span>
+                    <span>{selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.duration ?? 0), 0)} min</span>
                   </div>
                   <div className="flex justify-between items-center mb-2">
                     <span className="font-bold text-stone-900">Total to pay</span>
-                    <span className="text-xl md:text-3xl font-bold text-stone-900 font-display">₹{selectedServices.reduce((acc, s) => acc + s.price, 0)}</span>
+                    <span className="text-xl md:text-3xl font-bold text-stone-900 font-display">
+                      ₹{selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.price ?? 0), 0)}
+                    </span>
                   </div>
                   <p className="text-[10px] md:text-xs text-stone-500 flex items-center">
                     <CreditCard className="w-3 h-3 mr-1.5" />
@@ -420,10 +405,10 @@ export default function SalonDetails() {
                         href={`https://wa.me/${salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + salon.owner.phone.replace(/\D/g, '') : salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${salon.owner.name}, I just booked an appointment at ${salon.name} for ${format(selectedDate, 'MMM d, yyyy')} at ${selectedTime}.`)}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="w-full flex items-center justify-center space-x-2 bg-[#25D366] text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-[#128C7E] transition-colors shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 bg-[#25D366] text-white px-4 py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-[#128C7E] transition-colors shadow-sm text-center"
                       >
-                        <svg className="w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                        <span>Notify Seller on WhatsApp</span>
+                        <svg className="w-5 h-5 md:w-6 md:h-6 shrink-0" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                        <span className="leading-tight">Notify Seller on WhatsApp</span>
                       </a>
                     )}
                     
@@ -438,10 +423,10 @@ export default function SalonDetails() {
                   <>
                     <button
                       onClick={handleBook}
-                      disabled={!selectedTime || bookingLoading || (user && user.role !== 'CUSTOMER')}
+                      disabled={!selectedTime || bookingLoading || (user && user.role !== 'CUSTOMER') || !user?.gender}
                       className="w-full bg-stone-900 text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     >
-                      {bookingLoading ? 'Processing...' : (user && user.role !== 'CUSTOMER' ? 'Booking Restricted' : 'Book Appointment')}
+                      {bookingLoading ? 'Processing...' : (user && user.role !== 'CUSTOMER' ? 'Booking Restricted' : (!user?.gender ? 'Set Gender in Profile' : 'Book Appointment'))}
                     </button>
                     {user && user.role !== 'CUSTOMER' && (
                       <p className="text-xs text-red-500 text-center font-medium mt-2">

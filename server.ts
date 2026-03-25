@@ -4,11 +4,13 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ServiceTargetGender, UserGender } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 dotenv.config();
 
@@ -20,7 +22,10 @@ declare global {
   }
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const moduleUrl = import.meta.url;
+const __dirname = moduleUrl.startsWith('file:')
+  ? path.dirname(fileURLToPath(moduleUrl))
+  : process.cwd();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
 
@@ -40,15 +45,67 @@ function isOverlapping(startA: number, endA: number, startB: number, endB: numbe
   return startA < endB && endA > startB;
 }
 
-// --- Slot Generator ---
-async function getAvailableSlots(prisma: PrismaClient, salonId: string, serviceIdsStr: string, date: string, staffId?: string) {
-  const serviceIds = serviceIdsStr.split(',');
-  const services = await prisma.service.findMany({
+function mapUserGenderToServiceTarget(gender: UserGender): ServiceTargetGender {
+  return gender === 'FEMALE' ? 'FEMALE' : 'MALE';
+}
+
+type ResolvedServiceVariant = {
+  serviceId: string;
+  serviceName: string;
+  variantId: string;
+  targetGender: ServiceTargetGender;
+  price: number;
+  duration: number;
+};
+
+async function resolveServiceVariantsForUser(
+  prismaClient: PrismaClient,
+  serviceIds: string[],
+  userGender: UserGender
+): Promise<ResolvedServiceVariant[]> {
+  const services = await prismaClient.service.findMany({
     where: { id: { in: serviceIds } },
+    include: { variants: true },
   });
 
-  if (services.length !== serviceIds.length || services.length === 0) throw new Error("One or more services not found");
+  if (services.length !== serviceIds.length || services.length === 0) {
+    throw new Error('One or more services not found');
+  }
 
+  const requestedGender = mapUserGenderToServiceTarget(userGender);
+  const resolved = services.map((service) => {
+    const exact = service.variants.find((v) => v.targetGender === requestedGender);
+    const fallback = service.variants.find((v) => v.targetGender === 'UNISEX');
+    const chosen = exact ?? fallback;
+    if (!chosen) {
+      throw new Error(`Service "${service.name}" is not available for your profile gender`);
+    }
+    return {
+      serviceId: service.id,
+      serviceName: service.name,
+      variantId: chosen.id,
+      targetGender: chosen.targetGender,
+      price: chosen.price,
+      duration: chosen.duration,
+    };
+  });
+
+  const serviceOrder = new Map(serviceIds.map((id, index) => [id, index]));
+  resolved.sort((a, b) => (serviceOrder.get(a.serviceId) ?? 0) - (serviceOrder.get(b.serviceId) ?? 0));
+  return resolved;
+}
+
+// --- Slot Generator ---
+async function getAvailableSlots(
+  prisma: PrismaClient,
+  salonId: string,
+  serviceIdsStr: string,
+  date: string,
+  userGender: UserGender,
+  staffId?: string
+) {
+  const serviceIds = serviceIdsStr.split(',');
+  const services = await resolveServiceVariantsForUser(prisma, serviceIds, userGender);
   const duration = services.reduce((acc, s) => acc + s.duration, 0);
 
   const staffList = await prisma.staff.findMany({
@@ -125,26 +182,78 @@ async function getAvailableSlots(prisma: PrismaClient, salonId: string, serviceI
 
 // --- Safe Booking API ---
 async function createBooking(prisma: PrismaClient, data: any) {
-  const { staffId, startTime, duration, totalAmount, serviceIds } = data;
+  const { staffId, salonId, startTime, duration, totalAmount, resolvedServices } = data;
 
   const endTime = new Date(new Date(startTime).getTime() + duration * 60000);
 
   return await prisma.$transaction(async (tx) => {
     const fifteenMinsAgo = new Date(new Date().getTime() - 15 * 60000);
 
+    const startDate = new Date(startTime);
+    const day = startDate.getUTCDay();
+    const startMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
+    const endMinutes = startMinutes + duration;
+
+    const serviceIds = resolvedServices.map((s: ResolvedServiceVariant) => s.serviceId);
+
+    const staffIdToUse: string = (() => {
+      if (staffId) return staffId;
+      return "";
+    })();
+
+    const resolveStaffId = async () => {
+      if (staffIdToUse) return staffIdToUse;
+
+      const candidates = await tx.staff.findMany({
+        where: {
+          salonId,
+          isActive: true,
+          AND: serviceIds.map((id) => ({
+            services: { some: { serviceId: id } },
+          })),
+        },
+        include: { availability: true },
+      });
+
+      for (const candidate of candidates) {
+        const availability = candidate.availability.find((a) => a.dayOfWeek === day);
+        if (!availability) continue;
+
+        const availStart = timeToMinutes(availability.startTime);
+        const availEnd = timeToMinutes(availability.endTime);
+
+        if (startMinutes < availStart || endMinutes > availEnd) continue;
+
+        const conflict = await tx.booking.findFirst({
+          where: {
+            staffId: candidate.id,
+            startTime: { lt: endTime },
+            endTime: { gt: startDate },
+            OR: [
+              { status: "CONFIRMED" },
+              { status: "PENDING", createdAt: { gt: fifteenMinsAgo } },
+            ],
+          },
+        });
+
+        if (!conflict) return candidate.id;
+      }
+
+      throw new Error("No available professional for the selected slot");
+    };
+
+    const resolvedStaffId = await resolveStaffId();
+
+    // Double-check conflict even when staffId was provided (race condition safety)
     const conflict = await tx.booking.findFirst({
       where: {
-        staffId,
-        startTime: {
-          lt: endTime,
-        },
-        endTime: {
-          gt: new Date(startTime),
-        },
+        staffId: resolvedStaffId,
+        startTime: { lt: endTime },
+        endTime: { gt: startDate },
         OR: [
           { status: "CONFIRMED" },
-          { status: "PENDING", createdAt: { gt: fifteenMinsAgo } }
-        ]
+          { status: "PENDING", createdAt: { gt: fifteenMinsAgo } },
+        ],
       },
     });
 
@@ -152,19 +261,41 @@ async function createBooking(prisma: PrismaClient, data: any) {
       throw new Error("Slot already booked");
     }
 
+    // If a staffId was provided, ensure they are actually available for that slot.
+    if (staffIdToUse) {
+      const staffAvailability = await tx.staff.findUnique({
+        where: { id: resolvedStaffId },
+        select: { availability: true },
+      });
+      const availability = staffAvailability?.availability.find((a) => a.dayOfWeek === day);
+      if (!availability) {
+        throw new Error("Selected professional is not available on this day");
+      }
+      const availStart = timeToMinutes(availability.startTime);
+      const availEnd = timeToMinutes(availability.endTime);
+      if (startMinutes < availStart || endMinutes > availEnd) {
+        throw new Error("Selected professional is not available for this time");
+      }
+    }
+
     return tx.booking.create({
       data: {
         userId: data.userId,
         salonId: data.salonId,
-        staffId: data.staffId,
+        staffId: resolvedStaffId,
         startTime: new Date(startTime),
         endTime,
         totalAmount,
         status: 'CONFIRMED',
         paymentStatus: 'PENDING',
         services: {
-          create: serviceIds.map((id: string) => ({
-            service: { connect: { id } }
+          create: resolvedServices.map((service: ResolvedServiceVariant) => ({
+            service: { connect: { id: service.serviceId } },
+            variant: { connect: { id: service.variantId } },
+            serviceNameAtBooking: service.serviceName,
+            targetGenderAtBooking: service.targetGender,
+            priceAtBooking: service.price,
+            durationAtBooking: service.duration,
           }))
         }
       },
@@ -190,11 +321,16 @@ export async function createApp() {
   // Auth
   app.post('/api/auth/register', async (req: Request, res: Response) => {
     try {
-      const { name, email, password, role, phone } = req.body;
+      const { name, email, password, role, phone, gender } = req.body;
       
       // Restrict roles during registration
       if (role && !['CUSTOMER', 'SELLER'].includes(role)) {
         return res.status(400).json({ error: 'Invalid role' });
+      }
+
+      const normalizedGender = gender ? String(gender).toUpperCase() : undefined;
+      if (normalizedGender && !['MALE', 'FEMALE', 'OTHER'].includes(normalizedGender)) {
+        return res.status(400).json({ error: 'Invalid gender' });
       }
 
       const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -203,10 +339,20 @@ export async function createApp() {
       }
       const hashedPassword = await bcrypt.hash(password, 10);
       const user = await prisma.user.create({
-        data: { name, email, password: hashedPassword, role: role || 'CUSTOMER', phone },
+        data: {
+          name,
+          email,
+          password: hashedPassword,
+          role: role || 'CUSTOMER',
+          phone,
+          gender: (normalizedGender as UserGender | undefined) ?? null,
+        },
       });
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
-      res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      res.json({
+        token,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
+      });
     } catch (error) {
       res.status(500).json({ error: 'Registration failed' });
     }
@@ -222,7 +368,10 @@ export async function createApp() {
       if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
-      res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+      res.json({
+        token,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
+      });
     } catch (error) {
       res.status(500).json({ error: 'Login failed' });
     }
@@ -245,7 +394,7 @@ export async function createApp() {
   app.get('/api/salons', async (req: Request, res: Response) => {
     try {
       const salons = await prisma.salon.findMany({
-        include: { services: true, reviews: true }
+        include: { services: { include: { variants: true } }, reviews: true }
       });
       res.json(salons);
     } catch (error) {
@@ -259,7 +408,7 @@ export async function createApp() {
       const salon = await prisma.salon.findUnique({
         where: { id: req.params.id },
         include: { 
-          services: true, 
+          services: { include: { variants: true } }, 
           staff: {
             include: { services: true }
           }, 
@@ -286,7 +435,7 @@ export async function createApp() {
     try {
       const salon = await prisma.salon.findFirst({
         where: { ownerId: req.user.userId },
-        include: { services: true, staff: true }
+        include: { services: { include: { variants: true } }, staff: true }
       });
       res.json(salon || null);
     } catch (error) {
@@ -320,17 +469,62 @@ export async function createApp() {
   // Seller: Manage Services
   app.post('/api/seller/services', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
-    const { name, price, duration } = req.body;
+    const { name, variants } = req.body;
     try {
       const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      if (!Array.isArray(variants) || variants.length === 0) {
+        return res.status(400).json({ error: 'At least one service variant is required' });
+      }
+
+      const normalizedVariants = variants.map((variant: any) => ({
+        targetGender: String(variant.targetGender || '').toUpperCase(),
+        price: Number(variant.price),
+        duration: Number(variant.duration),
+      }));
+
+      const seenGenders = new Set<string>();
+      for (const variant of normalizedVariants) {
+        if (!['MALE', 'FEMALE', 'UNISEX'].includes(variant.targetGender)) {
+          return res.status(400).json({ error: 'Invalid variant gender. Use MALE, FEMALE, or UNISEX.' });
+        }
+        if (!Number.isFinite(variant.price) || variant.price <= 0 || !Number.isInteger(variant.price)) {
+          return res.status(400).json({ error: 'Variant price must be a positive whole number.' });
+        }
+        if (!Number.isFinite(variant.duration) || variant.duration <= 0 || !Number.isInteger(variant.duration)) {
+          return res.status(400).json({ error: 'Variant duration must be a positive whole number in minutes.' });
+        }
+        if (seenGenders.has(variant.targetGender)) {
+          return res.status(400).json({ error: 'Duplicate variant gender for one service is not allowed.' });
+        }
+        seenGenders.add(variant.targetGender);
+      }
+
+      // Backward-compatible defaults for DBs where Service.price/duration are still NOT NULL.
+      const baseVariant = normalizedVariants[0];
       
       const service = await prisma.service.create({
-        data: { name, price: parseFloat(price), duration: parseInt(duration), salonId: salon.id }
+        data: {
+          name,
+          salonId: salon.id,
+          price: baseVariant.price,
+          duration: baseVariant.duration,
+          variants: {
+            create: normalizedVariants.map((variant) => ({
+              targetGender: variant.targetGender as ServiceTargetGender,
+              price: variant.price,
+              duration: variant.duration,
+            })),
+          },
+        },
+        include: { variants: true },
       });
       res.json(service);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to add service' });
+    } catch (error: any) {
+      console.error('Failed to add service:', error);
+      const message = typeof error?.message === 'string' ? error.message : 'Failed to add service';
+      res.status(500).json({ error: message });
     }
   });
 
@@ -382,13 +576,25 @@ export async function createApp() {
   });
 
   // Bookings
-  app.get('/api/slots', async (req: Request, res: Response) => {
+  app.get('/api/slots', requireAuth, async (req: Request, res: Response) => {
     try {
+      if (req.user.role !== 'CUSTOMER') return res.status(403).json({ error: 'Only customers can view booking slots' });
       const { salonId, serviceIds, date, staffId } = req.query;
       if (!salonId || !serviceIds || !date) {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
-      const slots = await getAvailableSlots(prisma, String(salonId), String(serviceIds), String(date), staffId ? String(staffId) : undefined);
+      const currentUser = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { gender: true } });
+      if (!currentUser?.gender) {
+        return res.status(400).json({ error: 'Please complete your profile gender before checking slots.' });
+      }
+      const slots = await getAvailableSlots(
+        prisma,
+        String(salonId),
+        String(serviceIds),
+        String(date),
+        currentUser.gender,
+        staffId ? String(staffId) : undefined
+      );
       res.json({ slots });
     } catch (error: any) {
       res.status(500).json({ error: error.message || 'Failed to fetch slots' });
@@ -403,16 +609,19 @@ export async function createApp() {
         return res.status(400).json({ error: 'No services selected' });
       }
 
-      const services = await prisma.service.findMany({ where: { id: { in: serviceIds } } });
-      if (services.length !== serviceIds.length) return res.status(404).json({ error: 'One or more services not found' });
+      const currentUser = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { gender: true } });
+      if (!currentUser?.gender) {
+        return res.status(400).json({ error: 'Please complete your profile gender before booking.' });
+      }
 
-      const totalDuration = services.reduce((acc, s) => acc + s.duration, 0);
-      const totalPrice = services.reduce((acc, s) => acc + s.price, 0);
+      const resolvedServices = await resolveServiceVariantsForUser(prisma, serviceIds, currentUser.gender);
+      const totalDuration = resolvedServices.reduce((acc, s) => acc + s.duration, 0);
+      const totalPrice = resolvedServices.reduce((acc, s) => acc + s.price, 0);
 
       const booking = await createBooking(prisma, {
         userId: req.user.userId,
         salonId,
-        serviceIds,
+        resolvedServices,
         staffId,
         startTime: time,
         duration: totalDuration,
@@ -579,12 +788,16 @@ export async function createApp() {
   // Update user profile
   app.put('/api/users/profile', requireAuth, async (req: Request, res: Response) => {
     try {
-      const { name, phone } = req.body;
+      const { name, phone, gender } = req.body;
+      const normalizedGender = gender ? String(gender).toUpperCase() : null;
+      if (normalizedGender && !['MALE', 'FEMALE', 'OTHER'].includes(normalizedGender)) {
+        return res.status(400).json({ error: 'Invalid gender' });
+      }
       const user = await prisma.user.update({
         where: { id: req.user.userId },
-        data: { name, phone }
+        data: { name, phone, gender: normalizedGender as UserGender | null }
       });
-      res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone });
+      res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender });
     } catch (error) {
       console.error('Error updating profile:', error);
       res.status(500).json({ error: 'Failed to update profile' });
@@ -692,6 +905,12 @@ export async function createApp() {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
+      configFile: false,
+      plugins: [react(), tailwindcss()],
+      define: {
+        'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
+        'process.env.GEMINI_API_KEY': JSON.stringify(process.env.GEMINI_API_KEY || '')
+      }
     });
     app.use(vite.middlewares);
   } else {

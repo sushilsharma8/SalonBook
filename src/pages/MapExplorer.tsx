@@ -127,6 +127,15 @@ function MapContent() {
             <MapPin className="w-5 h-5 mr-2 text-stone-900" /> Nearby Salons
           </h2>
           <p className="text-stone-500 text-xs md:text-sm mt-1">Discover the best spots around you</p>
+          <div className="mt-3 flex items-center justify-between text-xs">
+            <span className="px-2.5 py-1 rounded-full bg-stone-100 border border-stone-200 text-stone-700 font-semibold">{places.length} places</span>
+            <button
+              onClick={() => setSelectedPlace(null)}
+              className="text-stone-500 hover:text-stone-900 font-semibold"
+            >
+              Clear selection
+            </button>
+          </div>
         </div>
         
         {/* AI Assistant Panel */}
@@ -182,7 +191,7 @@ function MapContent() {
                 handleMarkerClick(place);
                 if (window.innerWidth < 768) setViewMode('map');
               }}
-              className={`p-4 rounded-2xl border cursor-pointer transition-all ${selectedPlace?.id === place.id ? 'border-stone-900 bg-stone-50 shadow-md' : 'border-stone-200 hover:border-stone-300 bg-white'}`}
+              className={`p-4 rounded-2xl border cursor-pointer transition-all ${selectedPlace?.id === place.id ? 'border-stone-900 bg-stone-50 shadow-md ring-1 ring-stone-300' : 'border-stone-200 hover:border-stone-300 bg-white'}`}
             >
               <h4 className="font-bold text-stone-900">{place.displayName}</h4>
               <p className="text-xs text-stone-500 mt-1 line-clamp-1">{place.formattedAddress}</p>

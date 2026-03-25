@@ -99,6 +99,15 @@ export default function AdminDashboard() {
 
       {activeTab === 'dashboard' && (
         <div className="space-y-8 animate-in fade-in duration-500">
+          <div className="bg-gradient-to-r from-stone-900 to-stone-800 text-white p-5 md:p-7 rounded-[1.5rem] border border-stone-800">
+            <p className="text-xs uppercase tracking-wider text-stone-300 font-bold mb-2">Platform health</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+              <div className="bg-white/10 rounded-xl px-4 py-3">Active users: <span className="font-bold">{stats.users}</span></div>
+              <div className="bg-white/10 rounded-xl px-4 py-3">Active salons: <span className="font-bold">{stats.salons}</span></div>
+              <div className="bg-white/10 rounded-xl px-4 py-3">Bookings tracked: <span className="font-bold">{stats.bookings}</span></div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-stone-200/60 flex items-center space-x-5 transition-all hover:shadow-md">
               <div className="p-4 bg-stone-100 text-stone-900 rounded-2xl border border-stone-200/60">
@@ -169,7 +178,7 @@ export default function AdminDashboard() {
                     {selectedActivity === item.id && (
                       <div className="mt-4 p-4 bg-white rounded-xl border border-stone-200 text-stone-600 text-sm space-y-2">
                         <p><strong>Customer:</strong> {item.user?.name} ({item.user?.email})</p>
-                        <p><strong>Services:</strong> {item.services?.map((s: any) => s.service.name).join(', ')}</p>
+                        <p><strong>Services:</strong> {item.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}</p>
                         <p><strong>Amount:</strong> ₹{item.totalAmount}</p>
                         <p><strong>Status:</strong> {item.status}</p>
                       </div>

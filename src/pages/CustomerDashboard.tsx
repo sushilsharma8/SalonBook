@@ -13,7 +13,11 @@ export default function CustomerDashboard() {
   
   // Profile Edit State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: user?.name || '', phone: user?.phone || '' });
+  const [profileForm, setProfileForm] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    gender: user?.gender || '',
+  });
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Review Modal State
@@ -131,6 +135,9 @@ export default function CustomerDashboard() {
 
   const upcomingBookings = bookings.filter(b => new Date(b.startTime) > new Date() && b.status !== 'CANCELLED');
   const pastBookings = bookings.filter(b => new Date(b.startTime) <= new Date() || b.status === 'CANCELLED');
+  const nextUpcoming = upcomingBookings
+    .slice()
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0];
   
   const displayedBookings = activeTab === 'upcoming' ? upcomingBookings : pastBookings;
 
@@ -152,6 +159,24 @@ export default function CustomerDashboard() {
           </div>
         </div>
       </div>
+
+      {nextUpcoming && (
+        <div className="bg-gradient-to-r from-stone-900 to-stone-800 text-white p-5 md:p-7 rounded-[1.5rem] border border-stone-800 shadow-sm">
+          <p className="text-[11px] uppercase tracking-wider text-stone-300 font-bold mb-2">Next appointment</p>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h3 className="text-xl md:text-2xl font-display font-bold">{nextUpcoming.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}</h3>
+              <p className="text-stone-300 mt-1 text-sm md:text-base">{nextUpcoming.salon.name} · {format(new Date(nextUpcoming.startTime), 'EEE, MMM d · h:mm a')}</p>
+            </div>
+            <Link
+              to={`/salon/${nextUpcoming.salonId}`}
+              className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-white text-stone-900 font-bold text-sm hover:bg-stone-100 transition-colors"
+            >
+              View salon
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-200/60 pb-4 gap-4">
@@ -202,7 +227,7 @@ export default function CustomerDashboard() {
                   <button 
                     onClick={() => {
                       setIsEditingProfile(false);
-                      setProfileForm({ name: user?.name || '', phone: user?.phone || '' });
+                      setProfileForm({ name: user?.name || '', phone: user?.phone || '', gender: user?.gender || '' });
                     }}
                     className="flex items-center space-x-2 px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl font-bold transition-colors text-sm"
                   >
@@ -255,6 +280,25 @@ export default function CustomerDashboard() {
                 <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">Account Type</label>
                 <div className="text-lg font-medium text-stone-900 bg-stone-50 px-5 py-4 rounded-2xl border border-stone-100 capitalize">{user?.role.toLowerCase()}</div>
               </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">Gender</label>
+                {isEditingProfile ? (
+                  <select
+                    value={profileForm.gender}
+                    onChange={(e) => setProfileForm({ ...profileForm, gender: e.target.value })}
+                    className="w-full text-lg font-medium text-stone-900 bg-white px-5 py-4 rounded-2xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none"
+                  >
+                    <option value="">Select gender</option>
+                    <option value="MALE">Male</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                ) : (
+                  <div className="text-lg font-medium text-stone-900 bg-stone-50 px-5 py-4 rounded-2xl border border-stone-100">
+                    {user?.gender ? user.gender.toLowerCase() : 'Not set'}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : displayedBookings.length === 0 ? (
@@ -273,15 +317,17 @@ export default function CustomerDashboard() {
               return (
                 <div key={booking.id} className="bg-white p-5 md:p-8 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-stone-200/60 flex flex-col md:flex-row gap-4 md:gap-6 justify-between items-start md:items-center transition-all hover:shadow-md">
                   <div className="space-y-3 md:space-y-4 flex-1 w-full">
-                    <div className="flex items-center justify-between md:justify-start md:space-x-3">
-                      <span className="font-bold text-lg md:text-xl text-stone-900 font-display order-1 md:order-2">{booking.services.map((s: any) => s.service.name).join(', ')}</span>
-                      <span className={`px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-wider order-2 md:order-1 ${
+                    <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                      <span className={`px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-wider ${
                         booking.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
                         booking.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
                         booking.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
                         'bg-red-100 text-red-800 border border-red-200'
                       }`}>
                         {booking.status}
+                      </span>
+                      <span className="font-bold text-lg md:text-xl text-stone-900 font-display">
+                        {booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}
                       </span>
                     </div>
                     

@@ -30,9 +30,17 @@ export default function SellerDashboard() {
   const [showStaffForm, setShowStaffForm] = useState(false);
   
   const [salonData, setSalonData] = useState({ name: '', address: '', openTime: '09:00', closeTime: '18:00', images: '' });
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [primaryCategory, setPrimaryCategory] = useState<string | null>(null);
   const [relatedCategories, setRelatedCategories] = useState<string[]>([]);
-  const [serviceData, setServiceData] = useState({ name: '', price: '', duration: '' });
+  const [serviceData, setServiceData] = useState({
+    name: '',
+    variants: [
+      { targetGender: 'MALE', price: '', duration: '' },
+      { targetGender: 'FEMALE', price: '', duration: '' },
+    ],
+  });
+  const [serviceError, setServiceError] = useState('');
   const [staffData, setStaffData] = useState({ name: '', skills: '' });
 
   useEffect(() => {
@@ -50,8 +58,16 @@ export default function SellerDashboard() {
       if (!salonRes.ok) throw new Error(fullSalon.error || 'Failed to fetch salon details');
       
       if (fullSalon) {
+        const parsedImages = fullSalon.images ? JSON.parse(fullSalon.images) : [];
         setSalon(fullSalon);
-        setSalonData({ name: fullSalon.name, address: fullSalon.address, openTime: fullSalon.openTime, closeTime: fullSalon.closeTime, images: fullSalon.images ? JSON.parse(fullSalon.images).join(', ') : '' });
+        setSalonData({
+          name: fullSalon.name,
+          address: fullSalon.address,
+          openTime: fullSalon.openTime,
+          closeTime: fullSalon.closeTime,
+          images: parsedImages.filter((img: string) => typeof img === 'string' && img.startsWith('http')).join(', '),
+        });
+        setUploadedImages(parsedImages.filter((img: string) => typeof img === 'string' && !img.startsWith('http')));
         if (fullSalon.categories) {
           try {
             const parsed = JSON.parse(fullSalon.categories);
@@ -74,12 +90,13 @@ export default function SellerDashboard() {
   const handleSalonSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const urlImages = salonData.images.split(',').map(s => s.trim()).filter(Boolean);
       const res = await fetch('/api/seller/salon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           ...salonData,
-          images: JSON.stringify(salonData.images.split(',').map(s => s.trim()).filter(Boolean)),
+          images: JSON.stringify([...urlImages, ...uploadedImages]),
           categories: JSON.stringify({ primary: primaryCategory, related: relatedCategories })
         })
       });
@@ -92,21 +109,89 @@ export default function SellerDashboard() {
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const dataUrls = await Promise.all(
+      files.map((file) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      }))
+    );
+
+    setUploadedImages(prev => [...prev, ...dataUrls]);
+    e.target.value = '';
+  };
+
   const handleServiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      setServiceError('');
+      const normalizedVariants = serviceData.variants
+        .map((v) => ({
+          ...v,
+          price: String(v.price).trim(),
+          duration: String(v.duration).trim(),
+        }))
+        .filter((v) => v.price || v.duration);
+
+      if (normalizedVariants.length === 0) {
+        setServiceError('Please add at least one valid variant (price + duration).');
+        return;
+      }
+
+      const hasIncompleteRow = normalizedVariants.some((v) => !v.price || !v.duration);
+      if (hasIncompleteRow) {
+        setServiceError('Each selected variant must have both price and duration.');
+        return;
+      }
+
+      const hasInvalidNumbers = normalizedVariants.some((v) => {
+        const price = Number(v.price);
+        const duration = Number(v.duration);
+        return !Number.isInteger(price) || price <= 0 || !Number.isInteger(duration) || duration <= 0;
+      });
+      if (hasInvalidNumbers) {
+        setServiceError('Price and duration must be positive whole numbers.');
+        return;
+      }
+
       const res = await fetch('/api/seller/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(serviceData)
+        body: JSON.stringify({
+          name: serviceData.name.trim(),
+          variants: normalizedVariants,
+        })
       });
+
+      const raw = await res.text();
+      let data: any = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        data = null;
+      }
+
       if (res.ok) {
         setShowServiceForm(false);
-        setServiceData({ name: '', price: '', duration: '' });
+        setServiceData({
+          name: '',
+          variants: [
+            { targetGender: 'MALE', price: '', duration: '' },
+            { targetGender: 'FEMALE', price: '', duration: '' },
+          ],
+        });
         fetchData();
+      } else {
+        setServiceError(data?.error || raw || `Failed to add service (HTTP ${res.status})`);
       }
     } catch (err) {
       console.error(err);
+      setServiceError('Failed to add service');
     }
   };
 
@@ -249,6 +334,32 @@ export default function SellerDashboard() {
                 <label className="block text-sm font-medium text-stone-700 mb-2">Image URLs (comma separated)</label>
                 <input type="text" className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50" value={salonData.images} onChange={e => setSalonData({...salonData, images: e.target.value})} placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg" />
               </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-stone-700 mb-2">Or Upload Images</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                  className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-stone-900 file:text-white hover:file:bg-stone-800"
+                />
+                {uploadedImages.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                    {uploadedImages.map((img, idx) => (
+                      <div key={`${idx}-${img.slice(0, 20)}`} className="relative rounded-xl overflow-hidden border border-stone-200 bg-white">
+                        <img src={img} alt={`Uploaded ${idx + 1}`} className="w-full h-24 object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setUploadedImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 bg-white/90 text-red-600 text-xs px-2 py-1 rounded-md border border-stone-200 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="mt-12 mb-8">
@@ -327,10 +438,42 @@ export default function SellerDashboard() {
               {showServiceForm && (
                 <form onSubmit={handleServiceSubmit} className="mb-8 space-y-4 bg-stone-50 p-6 rounded-2xl border border-stone-200/60">
                   <input type="text" placeholder="Service Name" required className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={serviceData.name} onChange={e => setServiceData({...serviceData, name: e.target.value})} />
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="number" placeholder="Price (₹)" required className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={serviceData.price} onChange={e => setServiceData({...serviceData, price: e.target.value})} />
-                    <input type="number" placeholder="Duration (min)" required className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={serviceData.duration} onChange={e => setServiceData({...serviceData, duration: e.target.value})} />
+                  <div className="space-y-3">
+                    {serviceData.variants.map((variant, index) => (
+                      <div key={variant.targetGender} className="grid grid-cols-3 gap-3 items-center">
+                        <div className="text-xs font-bold text-stone-500 bg-white border border-stone-200 rounded-xl px-3 py-3 text-center">
+                          {variant.targetGender}
+                        </div>
+                        <input
+                          type="number"
+                          placeholder="Price (₹)"
+                          className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+                          value={variant.price}
+                          onChange={(e) => {
+                            const next = [...serviceData.variants];
+                            next[index] = { ...next[index], price: e.target.value };
+                            setServiceData({ ...serviceData, variants: next });
+                          }}
+                        />
+                        <input
+                          type="number"
+                          placeholder="Duration (min)"
+                          className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+                          value={variant.duration}
+                          onChange={(e) => {
+                            const next = [...serviceData.variants];
+                            next[index] = { ...next[index], duration: e.target.value };
+                            setServiceData({ ...serviceData, variants: next });
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
+                  {serviceError && (
+                    <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                      {serviceError}
+                    </div>
+                  )}
                   <button type="submit" className="w-full bg-stone-900 text-white py-3.5 rounded-xl font-bold hover:bg-stone-800 transition-colors mt-2">Add Service</button>
                 </form>
               )}
@@ -344,11 +487,13 @@ export default function SellerDashboard() {
                       </div>
                       <div>
                         <div className="font-bold text-stone-900 text-lg">{s.name}</div>
-                        <div className="text-sm text-stone-500 font-medium">{s.duration} mins</div>
+                        <div className="text-xs text-stone-500 font-medium">
+                          {(s.variants || []).map((v: any) => `${v.targetGender}: ₹${v.price} / ${v.duration}m`).join(' | ') || 'No variants'}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center space-x-4">
-                      <div className="font-bold text-stone-900 text-xl font-display">₹{s.price}</div>
+                      <div className="font-bold text-stone-900 text-xl font-display">{(s.variants || []).length} variants</div>
                       <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
                         <XCircle className="w-5 h-5" />
                       </button>
@@ -417,7 +562,9 @@ export default function SellerDashboard() {
                           </div>
                           <div className="space-y-3 w-full">
                             <div className="flex flex-wrap items-center gap-3">
-                              <span className="font-bold text-xl text-stone-900 font-display">{booking.services.map((s: any) => s.service.name).join(', ')}</span>
+                              <span className="font-bold text-xl text-stone-900 font-display">
+                                {booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}
+                              </span>
                               <span className={`px-3 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider ${
                                 booking.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
                                 booking.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800 border border-blue-200' :

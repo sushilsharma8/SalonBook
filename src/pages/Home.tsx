@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Star, MapPin, Clock, Search, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell } from 'lucide-react';
+import { Star, MapPin, Clock, Search, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ArrowRight } from 'lucide-react';
 
 interface Salon {
   id: string;
@@ -75,8 +75,27 @@ export default function Home() {
   }, [salons, searchQuery, selectedCategory]);
 
   if (loading) {
-    return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
+    return (
+      <div className="space-y-8">
+        <div className="h-64 rounded-[2rem] bg-stone-200/60 animate-pulse" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-72 rounded-[1.5rem] bg-stone-200/60 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
   }
+
+  const isSalonOpenNow = (openTime: string, closeTime: string) => {
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const [oh, om] = openTime.split(':').map(Number);
+    const [ch, cm] = closeTime.split(':').map(Number);
+    const start = oh * 60 + om;
+    const end = ch * 60 + cm;
+    return currentMins >= start && currentMins <= end;
+  };
 
   return (
     <div className="space-y-12">
@@ -101,6 +120,14 @@ export default function Home() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+          </div>
+
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {['Instant booking', 'Verified reviews', 'Top-rated salons'].map((tag) => (
+              <span key={tag} className="text-xs md:text-sm font-semibold px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-stone-100">
+                {tag}
+              </span>
+            ))}
           </div>
         </div>
       </div>
@@ -130,6 +157,21 @@ export default function Home() {
             <span>{cat.label}</span>
           </button>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
+          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Active salons</p>
+          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.length}</p>
+        </div>
+        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
+          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Total services</p>
+          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.reduce((acc, salon) => acc + salon.services.length, 0)}</p>
+        </div>
+        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
+          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Reviewed salons</p>
+          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.filter((s) => s.reviews.length > 0).length}</p>
+        </div>
       </div>
 
       <div className="flex items-center justify-between mb-8 mt-4">
@@ -163,6 +205,13 @@ export default function Home() {
                   <Star className="w-4 h-4 text-stone-900 fill-current" />
                   <span>{avgRating}</span>
                 </div>
+                <div className={`absolute top-4 left-4 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border ${
+                  isSalonOpenNow(salon.openTime, salon.closeTime)
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-red-50 text-red-700 border-red-200'
+                }`}>
+                  {isSalonOpenNow(salon.openTime, salon.closeTime) ? 'Open now' : 'Closed'}
+                </div>
               </div>
               
               <div className="p-6 flex-1 flex flex-col">
@@ -184,7 +233,7 @@ export default function Home() {
                     {salon.services.length} services
                   </span>
                   <span className="text-stone-900 font-semibold group-hover:translate-x-1 transition-transform flex items-center">
-                    Book Now <span className="ml-1">&rarr;</span>
+                    Book Now <ArrowRight className="w-4 h-4 ml-1" />
                   </span>
                 </div>
               </div>

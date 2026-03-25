@@ -12,11 +12,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ServiceTargetGender {
+  MALE
+  FEMALE
+  UNISEX
+}
+
 model User {
   id        String   @id @default(uuid())
   role      String   @default("CUSTOMER") // CUSTOMER, SELLER, ADMIN
   name      String
   phone     String?
+  gender    UserGender?
   email     String?  @unique
   password  String   @default("")
   createdAt DateTime @default(now())
@@ -68,11 +81,26 @@ model Service {
   salon     Salon    @relation(fields: [salonId], references: [id])
 
   name      String
-  price     Int
-  duration  Int // minutes
+  price     Int? // legacy fallback; no longer used for booking math
+  duration  Int? // legacy fallback; no longer used for booking math
 
   staff     StaffService[]
   bookings  BookingService[]
+  variants  ServiceVariant[]
+}
+
+model ServiceVariant {
+  id           String              @id @default(uuid())
+  serviceId    String
+  service      Service             @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  targetGender ServiceTargetGender
+  price        Int
+  duration     Int // minutes
+  createdAt    DateTime            @default(now())
+
+  bookingItems BookingService[]
+
+  @@unique([serviceId, targetGender])
 }
 
 model StaffService {
@@ -136,9 +164,15 @@ model BookingService {
   id        String   @id @default(uuid())
   bookingId String
   serviceId String
+  variantId String?
+  serviceNameAtBooking String
+  targetGenderAtBooking ServiceTargetGender
+  priceAtBooking Int
+  durationAtBooking Int
 
   booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   service   Service  @relation(fields: [serviceId], references: [id])
+  variant   ServiceVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@unique([bookingId, serviceId])
 }
