@@ -3,7 +3,6 @@
   "buildCommand": "npm run vercel-build",
   "functions": {
     "api/index.ts": {
-      "runtime": "@vercel/node@5.3.22",
       "includeFiles": "{dist/**,server.ts}"
     }
   },

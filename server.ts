@@ -9,8 +9,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 
 dotenv.config();
 
@@ -902,6 +900,8 @@ export async function createApp() {
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
     const { createServer: createViteServer } = await import('vite');
+    const { default: react } = await import('@vitejs/plugin-react');
+    const { default: tailwindcss } = await import('@tailwindcss/vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
