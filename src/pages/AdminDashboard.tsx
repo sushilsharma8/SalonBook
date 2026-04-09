@@ -196,7 +196,8 @@ export default function AdminDashboard() {
           <h2 className="text-2xl font-bold text-stone-900 mb-8 font-display tracking-tight flex items-center">
             <Users className="w-6 h-6 mr-3 text-stone-400" /> Manage Users
           </h2>
-          <div className="overflow-x-auto">
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-stone-200 text-sm text-stone-500 uppercase tracking-wider">
@@ -224,29 +225,44 @@ export default function AdminDashboard() {
                     <td className="py-4 text-sm">{new Date(u.createdAt).toLocaleDateString()}</td>
                     <td className="py-4 text-right">
                       {u.role !== 'ADMIN' && (
-                        <button 
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete User"
-                        >
+                        <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete User">
                           <Trash2 className="w-5 h-5" />
                         </button>
                       )}
                       {u.role === 'ADMIN' && (
-                        <span className="p-2 text-stone-300 inline-block" title="Cannot delete admin">
-                          <Shield className="w-5 h-5" />
-                        </span>
+                        <span className="p-2 text-stone-300 inline-block" title="Cannot delete admin"><Shield className="w-5 h-5" /></span>
                       )}
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-stone-500">No users found.</td>
-                  </tr>
-                )}
+                {users.length === 0 && (<tr><td colSpan={5} className="py-8 text-center text-stone-500">No users found.</td></tr>)}
               </tbody>
             </table>
+          </div>
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {users.map(u => (
+              <div key={u.id} className="p-4 bg-stone-50 rounded-xl border border-stone-100 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-bold text-stone-900 text-sm truncate">{u.name}</div>
+                  <div className="text-xs text-stone-500 truncate">{u.email}</div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      u.role === 'ADMIN' ? 'bg-purple-100 text-purple-800' :
+                      u.role === 'SELLER' ? 'bg-blue-100 text-blue-800' :
+                      'bg-stone-100 text-stone-800'
+                    }`}>{u.role}</span>
+                    <span className="text-[10px] text-stone-400">{new Date(u.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+                {u.role !== 'ADMIN' ? (
+                  <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 className="w-4 h-4" /></button>
+                ) : (
+                  <span className="p-2 text-stone-300 shrink-0"><Shield className="w-4 h-4" /></span>
+                )}
+              </div>
+            ))}
+            {users.length === 0 && <p className="py-8 text-center text-stone-500 text-sm">No users found.</p>}
           </div>
         </div>
       )}
@@ -256,7 +272,8 @@ export default function AdminDashboard() {
           <h2 className="text-2xl font-bold text-stone-900 mb-8 font-display tracking-tight flex items-center">
             <Scissors className="w-6 h-6 mr-3 text-stone-400" /> Manage Salons
           </h2>
-          <div className="overflow-x-auto">
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-stone-200 text-sm text-stone-500 uppercase tracking-wider">
@@ -271,30 +288,32 @@ export default function AdminDashboard() {
                 {salons.map(s => (
                   <tr key={s.id} className="border-b border-stone-100 last:border-0 hover:bg-stone-50 transition-colors">
                     <td className="py-4 font-medium text-stone-900">{s.name}</td>
-                    <td className="py-4">
-                      <div>{s.owner?.name}</div>
-                      <div className="text-xs text-stone-500">{s.owner?.email}</div>
-                    </td>
+                    <td className="py-4"><div>{s.owner?.name}</div><div className="text-xs text-stone-500">{s.owner?.email}</div></td>
                     <td className="py-4 text-sm max-w-[200px] truncate" title={s.address}>{s.address}</td>
                     <td className="py-4 text-sm">{new Date(s.createdAt).toLocaleDateString()}</td>
                     <td className="py-4 text-right">
-                      <button 
-                        onClick={() => handleDeleteSalon(s.id)}
-                        className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete Salon"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+                      <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete Salon"><Trash2 className="w-5 h-5" /></button>
                     </td>
                   </tr>
                 ))}
-                {salons.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-stone-500">No salons found.</td>
-                  </tr>
-                )}
+                {salons.length === 0 && (<tr><td colSpan={5} className="py-8 text-center text-stone-500">No salons found.</td></tr>)}
               </tbody>
             </table>
+          </div>
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-3">
+            {salons.map(s => (
+              <div key={s.id} className="p-4 bg-stone-50 rounded-xl border border-stone-100 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-bold text-stone-900 text-sm">{s.name}</div>
+                  <div className="text-xs text-stone-500 mt-0.5">{s.owner?.name} · {s.owner?.email}</div>
+                  <div className="text-xs text-stone-400 mt-1 truncate">{s.address}</div>
+                  <div className="text-[10px] text-stone-400 mt-1">{new Date(s.createdAt).toLocaleDateString()}</div>
+                </div>
+                <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            ))}
+            {salons.length === 0 && <p className="py-8 text-center text-stone-500 text-sm">No salons found.</p>}
           </div>
         </div>
       )}

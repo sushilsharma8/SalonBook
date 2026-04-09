@@ -480,21 +480,25 @@ export default function SellerDashboard() {
               
               <div className="space-y-4">
                 {salon.services?.map((s: any) => (
-                  <div key={s.id} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-stone-200/60 transition-all hover:border-stone-300 hover:shadow-sm group">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-stone-50 rounded-xl flex items-center justify-center border border-stone-100 group-hover:bg-white transition-colors">
-                        <Scissors className="w-5 h-5 text-stone-400 group-hover:text-stone-900 transition-colors" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-stone-900 text-lg">{s.name}</div>
-                        <div className="text-xs text-stone-500 font-medium">
-                          {(s.variants || []).map((v: any) => `${v.targetGender}: ₹${v.price} / ${v.duration}m`).join(' | ') || 'No variants'}
+                  <div key={s.id} className="p-4 sm:p-5 bg-white rounded-2xl border border-stone-200/60 transition-all hover:border-stone-300 hover:shadow-sm group">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start space-x-3 sm:space-x-4 min-w-0">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-stone-50 rounded-xl flex items-center justify-center border border-stone-100 shrink-0">
+                          <Scissors className="w-4 h-4 sm:w-5 sm:h-5 text-stone-400 group-hover:text-stone-900 transition-colors" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-stone-900 text-base sm:text-lg">{s.name}</div>
+                          <div className="text-xs text-stone-500 font-medium mt-1 flex flex-wrap gap-1.5">
+                            {(s.variants || []).map((v: any) => (
+                              <span key={v.targetGender} className="bg-stone-50 border border-stone-100 px-2 py-0.5 rounded-md">
+                                {v.targetGender}: ₹{v.price}/{v.duration}m
+                              </span>
+                            ))}
+                            {(!s.variants || s.variants.length === 0) && <span>No variants</span>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-4">
-                      <div className="font-bold text-stone-900 text-xl font-display">{(s.variants || []).length} variants</div>
-                      <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                      <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0">
                         <XCircle className="w-5 h-5" />
                       </button>
                     </div>

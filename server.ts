@@ -276,6 +276,8 @@ async function createBooking(prisma: PrismaClient, data: any) {
       }
     }
 
+    const actionToken = crypto.randomBytes(32).toString('hex');
+
     return tx.booking.create({
       data: {
         userId: data.userId,
@@ -286,6 +288,7 @@ async function createBooking(prisma: PrismaClient, data: any) {
         totalAmount,
         status: 'CONFIRMED',
         paymentStatus: 'PENDING',
+        actionToken,
         services: {
           create: resolvedServices.map((service: ResolvedServiceVariant) => ({
             service: { connect: { id: service.serviceId } },
@@ -889,6 +892,50 @@ export async function createApp() {
     } catch (error) {
       console.error('Error deleting salon:', error);
       res.status(500).json({ error: 'Failed to delete salon' });
+    }
+  });
+
+  // Booking quick-action (token-based, no login required)
+  app.get('/api/bookings/action/:token', async (req: Request, res: Response) => {
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { actionToken: req.params.token },
+        include: {
+          user: { select: { name: true, phone: true } },
+          salon: { select: { name: true } },
+          staff: { select: { name: true } },
+          services: { include: { service: { select: { name: true } } } }
+        }
+      });
+      if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
+      res.json(booking);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch booking' });
+    }
+  });
+
+  app.post('/api/bookings/action/:token', async (req: Request, res: Response) => {
+    const { action } = req.body;
+    if (!['CONFIRMED', 'CANCELLED'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Use CONFIRMED or CANCELLED.' });
+    }
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { actionToken: req.params.token },
+        include: { salon: true }
+      });
+      if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
+      if (booking.status !== 'PENDING' && booking.status !== 'CONFIRMED') {
+        return res.status(400).json({ error: `Cannot change status from ${booking.status}` });
+      }
+
+      const updated = await prisma.booking.update({
+        where: { id: booking.id },
+        data: { status: action }
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update booking' });
     }
   });
 
