@@ -323,7 +323,7 @@ async function main() {
       lat: 28.5440,
       lng: 77.2100,
       categories: JSON.stringify({ primary: 'beauty', related: ['hair', 'spa'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1633681122611-a48c60529f22?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&q=80&w=800']),
     },
   });
 
