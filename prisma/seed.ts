@@ -66,7 +66,7 @@ async function main() {
       lat: 34.0736,
       lng: -118.4004,
       categories: JSON.stringify({ primary: 'hair', related: ['styling', 'color'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-elite/800/400']),
     },
   });
 
@@ -80,7 +80,7 @@ async function main() {
       lat: 34.0195,
       lng: -118.4912,
       categories: JSON.stringify({ primary: 'spa', related: ['massage', 'facial'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-serenity/800/400']),
     },
   });
 
@@ -308,7 +308,7 @@ async function main() {
       lat: 28.5700,
       lng: 77.2400,
       categories: JSON.stringify({ primary: 'hair', related: ['beauty', 'nails'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-glanz/800/400']),
     },
   });
 
@@ -323,7 +323,7 @@ async function main() {
       lat: 28.5440,
       lng: 77.2100,
       categories: JSON.stringify({ primary: 'beauty', related: ['hair', 'spa'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1633681122611-a48c60529f22?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-purete/800/400']),
     },
   });
 
@@ -338,7 +338,7 @@ async function main() {
       lat: 28.5921,
       lng: 77.0410,
       categories: JSON.stringify({ primary: 'hair', related: ['barber', 'beauty'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1562322140-8baeececf3df?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-hairmasters/800/400']),
     },
   });
 
@@ -353,7 +353,7 @@ async function main() {
       lat: 28.6492,
       lng: 77.1215,
       categories: JSON.stringify({ primary: 'hair', related: ['nails', 'waxing'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1600948836101-f9ffda59d250?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-cutstyle/800/400']),
     },
   });
 
@@ -368,7 +368,7 @@ async function main() {
       lat: 28.6315,
       lng: 77.2167,
       categories: JSON.stringify({ primary: 'beauty', related: ['hair', 'medspa'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-looks/800/400']),
     },
   });
 
@@ -383,7 +383,7 @@ async function main() {
       lat: 30.7046,
       lng: 76.7179,
       categories: JSON.stringify({ primary: 'hair', related: ['nails', 'beauty'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-hairspace/800/400']),
     },
   });
 
@@ -398,7 +398,7 @@ async function main() {
       lat: 30.7110,
       lng: 76.7210,
       categories: JSON.stringify({ primary: 'beauty', related: ['spa', 'hair'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-cleopatra/800/400']),
     },
   });
 
@@ -413,7 +413,7 @@ async function main() {
       lat: 30.7075,
       lng: 76.7250,
       categories: JSON.stringify({ primary: 'hair', related: ['barber', 'beauty'] }),
-      images: JSON.stringify(['https://images.unsplash.com/photo-1605497788044-5a32c7078486?auto=format&fit=crop&q=80&w=800']),
+      images: JSON.stringify(['https://picsum.photos/seed/salon-goodlooks/800/400']),
     },
   });
 
@@ -422,49 +422,49 @@ async function main() {
     {
       salon: salonDelhi1,
       services: [
-        { name: 'Haircut & Styling', variants: [{ targetGender: 'MALE', price: 99, duration: 30 }, { targetGender: 'FEMALE', price: 199, duration: 45 }] },
-        { name: 'Hair Smoothening', variants: [{ targetGender: 'UNISEX', price: 2499, duration: 180 }] },
-        { name: 'Facial', variants: [{ targetGender: 'MALE', price: 399, duration: 45 }, { targetGender: 'FEMALE', price: 499, duration: 60 }] },
-        { name: 'Hair Colour', variants: [{ targetGender: 'UNISEX', price: 799, duration: 90 }] },
+        { name: 'Haircut & Styling', variants: [{ targetGender: 'MALE', price: 99, duration: 30 }, { targetGender: 'FEMALE', price: 149, duration: 45 }] },
+        { name: 'Hair Smoothening', variants: [{ targetGender: 'UNISEX', price: 999, duration: 180 }] },
+        { name: 'Facial', variants: [{ targetGender: 'MALE', price: 199, duration: 45 }, { targetGender: 'FEMALE', price: 249, duration: 60 }] },
+        { name: 'Hair Colour', variants: [{ targetGender: 'UNISEX', price: 399, duration: 90 }] },
       ],
     },
     {
       salon: salonDelhi2,
       services: [
-        { name: 'Premium Haircut', variants: [{ targetGender: 'MALE', price: 299, duration: 30 }, { targetGender: 'FEMALE', price: 599, duration: 60 }] },
-        { name: 'Keratin Treatment', variants: [{ targetGender: 'UNISEX', price: 3999, duration: 240 }] },
-        { name: 'Bridal Makeup', variants: [{ targetGender: 'FEMALE', price: 7999, duration: 180 }] },
-        { name: 'D-Tan Pack', variants: [{ targetGender: 'UNISEX', price: 699, duration: 45 }] },
-        { name: 'Manicure & Pedicure', variants: [{ targetGender: 'UNISEX', price: 999, duration: 75 }] },
+        { name: 'Premium Haircut', variants: [{ targetGender: 'MALE', price: 149, duration: 30 }, { targetGender: 'FEMALE', price: 249, duration: 60 }] },
+        { name: 'Keratin Treatment', variants: [{ targetGender: 'UNISEX', price: 1499, duration: 240 }] },
+        { name: 'Bridal Makeup', variants: [{ targetGender: 'FEMALE', price: 2999, duration: 180 }] },
+        { name: 'D-Tan Pack', variants: [{ targetGender: 'UNISEX', price: 299, duration: 45 }] },
+        { name: 'Manicure & Pedicure', variants: [{ targetGender: 'UNISEX', price: 399, duration: 75 }] },
       ],
     },
     {
       salon: salonDelhi3,
       services: [
-        { name: 'Haircut', variants: [{ targetGender: 'MALE', price: 199, duration: 30 }, { targetGender: 'FEMALE', price: 449, duration: 45 }] },
-        { name: 'Beard Grooming', variants: [{ targetGender: 'MALE', price: 149, duration: 20 }] },
-        { name: 'Hair Spa', variants: [{ targetGender: 'UNISEX', price: 899, duration: 60 }] },
-        { name: 'Global Hair Colour', variants: [{ targetGender: 'UNISEX', price: 1499, duration: 120 }] },
-        { name: 'Straightening', variants: [{ targetGender: 'UNISEX', price: 2999, duration: 180 }] },
+        { name: 'Haircut', variants: [{ targetGender: 'MALE', price: 99, duration: 30 }, { targetGender: 'FEMALE', price: 199, duration: 45 }] },
+        { name: 'Beard Grooming', variants: [{ targetGender: 'MALE', price: 79, duration: 20 }] },
+        { name: 'Hair Spa', variants: [{ targetGender: 'UNISEX', price: 349, duration: 60 }] },
+        { name: 'Global Hair Colour', variants: [{ targetGender: 'UNISEX', price: 599, duration: 120 }] },
+        { name: 'Straightening', variants: [{ targetGender: 'UNISEX', price: 1299, duration: 180 }] },
       ],
     },
     {
       salon: salonDelhi4,
       services: [
-        { name: 'Haircut & Blow Dry', variants: [{ targetGender: 'FEMALE', price: 499, duration: 60 }] },
-        { name: "Men's Grooming Package", variants: [{ targetGender: 'MALE', price: 399, duration: 45 }] },
-        { name: 'Waxing Full Arms', variants: [{ targetGender: 'FEMALE', price: 299, duration: 30 }] },
-        { name: 'Nail Art', variants: [{ targetGender: 'FEMALE', price: 599, duration: 45 }] },
-        { name: 'Clean Up Facial', variants: [{ targetGender: 'UNISEX', price: 499, duration: 40 }] },
+        { name: 'Haircut & Blow Dry', variants: [{ targetGender: 'FEMALE', price: 199, duration: 60 }] },
+        { name: "Men's Grooming Package", variants: [{ targetGender: 'MALE', price: 199, duration: 45 }] },
+        { name: 'Waxing Full Arms', variants: [{ targetGender: 'FEMALE', price: 149, duration: 30 }] },
+        { name: 'Nail Art', variants: [{ targetGender: 'FEMALE', price: 299, duration: 45 }] },
+        { name: 'Clean Up Facial', variants: [{ targetGender: 'UNISEX', price: 249, duration: 40 }] },
       ],
     },
     {
       salon: salonDelhi5,
       services: [
-        { name: 'Luxury Haircut', variants: [{ targetGender: 'MALE', price: 499, duration: 40 }, { targetGender: 'FEMALE', price: 799, duration: 60 }] },
-        { name: 'Hydra Facial', variants: [{ targetGender: 'UNISEX', price: 1999, duration: 60 }] },
-        { name: 'Botox Hair Treatment', variants: [{ targetGender: 'UNISEX', price: 4999, duration: 120 }] },
-        { name: 'Party Makeup', variants: [{ targetGender: 'FEMALE', price: 2499, duration: 90 }] },
+        { name: 'Luxury Haircut', variants: [{ targetGender: 'MALE', price: 249, duration: 40 }, { targetGender: 'FEMALE', price: 399, duration: 60 }] },
+        { name: 'Hydra Facial', variants: [{ targetGender: 'UNISEX', price: 799, duration: 60 }] },
+        { name: 'Botox Hair Treatment', variants: [{ targetGender: 'UNISEX', price: 1999, duration: 120 }] },
+        { name: 'Party Makeup', variants: [{ targetGender: 'FEMALE', price: 999, duration: 90 }] },
       ],
     },
   ];
@@ -474,30 +474,30 @@ async function main() {
     {
       salon: salonMohali1,
       services: [
-        { name: 'Haircut & Styling', variants: [{ targetGender: 'MALE', price: 199, duration: 30 }, { targetGender: 'FEMALE', price: 399, duration: 50 }] },
-        { name: 'Hair Colour', variants: [{ targetGender: 'UNISEX', price: 999, duration: 90 }] },
-        { name: 'Hair Spa', variants: [{ targetGender: 'UNISEX', price: 799, duration: 60 }] },
-        { name: 'Facial Gold', variants: [{ targetGender: 'UNISEX', price: 599, duration: 45 }] },
-        { name: 'Nail Extensions', variants: [{ targetGender: 'FEMALE', price: 1299, duration: 60 }] },
+        { name: 'Haircut & Styling', variants: [{ targetGender: 'MALE', price: 149, duration: 30 }, { targetGender: 'FEMALE', price: 249, duration: 50 }] },
+        { name: 'Hair Colour', variants: [{ targetGender: 'UNISEX', price: 499, duration: 90 }] },
+        { name: 'Hair Spa', variants: [{ targetGender: 'UNISEX', price: 349, duration: 60 }] },
+        { name: 'Facial Gold', variants: [{ targetGender: 'UNISEX', price: 299, duration: 45 }] },
+        { name: 'Nail Extensions', variants: [{ targetGender: 'FEMALE', price: 599, duration: 60 }] },
       ],
     },
     {
       salon: salonMohali2,
       services: [
-        { name: 'Bridal Package', variants: [{ targetGender: 'FEMALE', price: 9999, duration: 300 }] },
-        { name: 'Hair Straightening', variants: [{ targetGender: 'UNISEX', price: 2499, duration: 180 }] },
-        { name: 'Cleanup Facial', variants: [{ targetGender: 'UNISEX', price: 499, duration: 40 }] },
-        { name: 'Full Body Waxing', variants: [{ targetGender: 'FEMALE', price: 1499, duration: 90 }] },
-        { name: 'Hair Wash & Blow Dry', variants: [{ targetGender: 'FEMALE', price: 299, duration: 30 }] },
+        { name: 'Bridal Package', variants: [{ targetGender: 'FEMALE', price: 3999, duration: 300 }] },
+        { name: 'Hair Straightening', variants: [{ targetGender: 'UNISEX', price: 999, duration: 180 }] },
+        { name: 'Cleanup Facial', variants: [{ targetGender: 'UNISEX', price: 199, duration: 40 }] },
+        { name: 'Full Body Waxing', variants: [{ targetGender: 'FEMALE', price: 599, duration: 90 }] },
+        { name: 'Hair Wash & Blow Dry', variants: [{ targetGender: 'FEMALE', price: 149, duration: 30 }] },
       ],
     },
     {
       salon: salonMohali3,
       services: [
-        { name: 'Haircut', variants: [{ targetGender: 'MALE', price: 149, duration: 25 }, { targetGender: 'FEMALE', price: 299, duration: 45 }] },
-        { name: 'Beard Trim & Shape', variants: [{ targetGender: 'MALE', price: 99, duration: 15 }] },
-        { name: 'Highlights', variants: [{ targetGender: 'UNISEX', price: 1999, duration: 120 }] },
-        { name: 'Threading', variants: [{ targetGender: 'UNISEX', price: 49, duration: 10 }] },
+        { name: 'Haircut', variants: [{ targetGender: 'MALE', price: 99, duration: 25 }, { targetGender: 'FEMALE', price: 149, duration: 45 }] },
+        { name: 'Beard Trim & Shape', variants: [{ targetGender: 'MALE', price: 49, duration: 15 }] },
+        { name: 'Highlights', variants: [{ targetGender: 'UNISEX', price: 799, duration: 120 }] },
+        { name: 'Threading', variants: [{ targetGender: 'UNISEX', price: 29, duration: 10 }] },
       ],
     },
   ];
