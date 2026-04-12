@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield } from 'lucide-react';
+import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export default function AdminDashboard() {
   const { token } = useAuthStore();
@@ -292,7 +293,10 @@ export default function AdminDashboard() {
                     <td className="py-4 text-sm max-w-[200px] truncate" title={s.address}>{s.address}</td>
                     <td className="py-4 text-sm">{new Date(s.createdAt).toLocaleDateString()}</td>
                     <td className="py-4 text-right">
-                      <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete Salon"><Trash2 className="w-5 h-5" /></button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Link to={`/admin/salon/${s.id}`} className="p-2 text-stone-400 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors" title="Manage Salon"><Settings className="w-5 h-5" /></Link>
+                        <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete Salon"><Trash2 className="w-5 h-5" /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -310,7 +314,10 @@ export default function AdminDashboard() {
                   <div className="text-xs text-stone-400 mt-1 truncate">{s.address}</div>
                   <div className="text-[10px] text-stone-400 mt-1">{new Date(s.createdAt).toLocaleDateString()}</div>
                 </div>
-                <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 className="w-4 h-4" /></button>
+                <div className="flex flex-col gap-1 shrink-0">
+                  <Link to={`/admin/salon/${s.id}`} className="p-2 text-stone-400 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors"><Settings className="w-4 h-4" /></Link>
+                  <button onClick={() => handleDeleteSalon(s.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                </div>
               </div>
             ))}
             {salons.length === 0 && <p className="py-8 text-center text-stone-500 text-sm">No salons found.</p>}

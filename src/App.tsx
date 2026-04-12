@@ -14,6 +14,7 @@ import CustomerDashboard from './pages/CustomerDashboard';
 import SellerDashboard from './pages/SellerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import BookingAction from './pages/BookingAction';
+import AdminSalonManage from './pages/AdminSalonManage';
 
 function ProtectedRoute({ children, role }: { children: React.ReactNode, role?: string }) {
   const { user } = useAuthStore();
@@ -53,6 +54,14 @@ export default function App() {
             element={
               <ProtectedRoute role="ADMIN">
                 <AdminDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/admin/salon/:id" 
+            element={
+              <ProtectedRoute role="ADMIN">
+                <AdminSalonManage />
               </ProtectedRoute>
             } 
           />
