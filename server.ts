@@ -931,6 +931,133 @@ export async function createApp() {
     }
   });
 
+  // Admin: Get single salon with full details for management
+  app.get('/api/admin/salons/:id', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const salon = await prisma.salon.findUnique({
+        where: { id: req.params.id },
+        include: {
+          owner: { select: { name: true, email: true, phone: true } },
+          services: { include: { variants: true } },
+          staff: true,
+          bookings: {
+            include: { user: { select: { name: true, phone: true } }, services: { include: { service: true } }, staff: true },
+            orderBy: { startTime: 'desc' },
+            take: 50
+          }
+        }
+      });
+      if (!salon) return res.status(404).json({ error: 'Salon not found' });
+      res.json(salon);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch salon' });
+    }
+  });
+
+  // Admin: Update salon details
+  app.put('/api/admin/salons/:id', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    const { name, address, openTime, closeTime, images, categories } = req.body;
+    try {
+      const salon = await prisma.salon.update({
+        where: { id: req.params.id },
+        data: { name, address, openTime, closeTime, images, categories }
+      });
+      res.json(salon);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update salon' });
+    }
+  });
+
+  // Admin: Add service to any salon
+  app.post('/api/admin/salons/:id/services', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    const { name, variants } = req.body;
+    try {
+      if (!Array.isArray(variants) || variants.length === 0) {
+        return res.status(400).json({ error: 'At least one variant required' });
+      }
+      const service = await prisma.service.create({
+        data: {
+          name,
+          salonId: req.params.id,
+          price: Number(variants[0].price),
+          duration: Number(variants[0].duration),
+          variants: {
+            create: variants.map((v: any) => ({
+              targetGender: String(v.targetGender).toUpperCase() as ServiceTargetGender,
+              price: Number(v.price),
+              duration: Number(v.duration),
+            })),
+          },
+        },
+        include: { variants: true },
+      });
+      const salonStaff = await prisma.staff.findMany({ where: { salonId: req.params.id }, select: { id: true } });
+      if (salonStaff.length > 0) {
+        await prisma.staffService.createMany({
+          data: salonStaff.map(s => ({ staffId: s.id, serviceId: service.id })),
+          skipDuplicates: true,
+        });
+      }
+      res.json(service);
+    } catch (error) {
+      console.error('Admin add service error:', error);
+      res.status(500).json({ error: 'Failed to add service' });
+    }
+  });
+
+  // Admin: Delete service from any salon
+  app.delete('/api/admin/salons/:salonId/services/:serviceId', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      await prisma.service.deleteMany({ where: { id: req.params.serviceId, salonId: req.params.salonId } });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to delete service' });
+    }
+  });
+
+  // Admin: Add staff to any salon
+  app.post('/api/admin/salons/:id/staff', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    const { name, skills } = req.body;
+    try {
+      const salon = await prisma.salon.findUnique({ where: { id: req.params.id }, include: { services: true } });
+      if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+      const staff = await prisma.staff.create({ data: { name, skills, salonId: req.params.id } });
+
+      const availabilityDays = [1, 2, 3, 4, 5, 6];
+      await prisma.staffAvailability.createMany({
+        data: availabilityDays.map(day => ({
+          staffId: staff.id, dayOfWeek: day, startTime: salon.openTime, endTime: salon.closeTime,
+        })),
+      });
+
+      if (salon.services.length > 0) {
+        await prisma.staffService.createMany({
+          data: salon.services.map(svc => ({ staffId: staff.id, serviceId: svc.id })),
+        });
+      }
+      res.json(staff);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to add staff' });
+    }
+  });
+
+  // Admin: Delete staff from any salon
+  app.delete('/api/admin/salons/:salonId/staff/:staffId', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      await prisma.staff.deleteMany({ where: { id: req.params.staffId, salonId: req.params.salonId } });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to delete staff' });
+    }
+  });
+
   // Booking quick-action (token-based, no login required)
   app.get('/api/bookings/action/:token', async (req: Request, res: Response) => {
     try {
