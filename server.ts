@@ -9,8 +9,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 
 dotenv.config();
 
@@ -278,6 +276,8 @@ async function createBooking(prisma: PrismaClient, data: any) {
       }
     }
 
+    const actionToken = crypto.randomBytes(32).toString('hex');
+
     return tx.booking.create({
       data: {
         userId: data.userId,
@@ -288,6 +288,7 @@ async function createBooking(prisma: PrismaClient, data: any) {
         totalAmount,
         status: 'CONFIRMED',
         paymentStatus: 'PENDING',
+        actionToken,
         services: {
           create: resolvedServices.map((service: ResolvedServiceVariant) => ({
             service: { connect: { id: service.serviceId } },
@@ -520,6 +521,16 @@ export async function createApp() {
         },
         include: { variants: true },
       });
+
+      // Auto-link new service to all existing staff in this salon
+      const salonStaff = await prisma.staff.findMany({ where: { salonId: salon.id }, select: { id: true } });
+      if (salonStaff.length > 0) {
+        await prisma.staffService.createMany({
+          data: salonStaff.map(s => ({ staffId: s.id, serviceId: service.id })),
+          skipDuplicates: true,
+        });
+      }
+
       res.json(service);
     } catch (error: any) {
       console.error('Failed to add service:', error);
@@ -533,14 +544,40 @@ export async function createApp() {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
     const { name, skills } = req.body;
     try {
-      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      const salon = await prisma.salon.findFirst({
+        where: { ownerId: req.user.userId },
+        include: { services: true }
+      });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
       
       const staff = await prisma.staff.create({
         data: { name, skills, salonId: salon.id }
       });
+
+      // Auto-create default availability (Mon-Sat, matching salon hours)
+      const availabilityDays = [1, 2, 3, 4, 5, 6]; // Mon-Sat
+      await prisma.staffAvailability.createMany({
+        data: availabilityDays.map(day => ({
+          staffId: staff.id,
+          dayOfWeek: day,
+          startTime: salon.openTime,
+          endTime: salon.closeTime,
+        })),
+      });
+
+      // Auto-link staff to all existing salon services
+      if (salon.services.length > 0) {
+        await prisma.staffService.createMany({
+          data: salon.services.map(svc => ({
+            staffId: staff.id,
+            serviceId: svc.id,
+          })),
+        });
+      }
+
       res.json(staff);
     } catch (error) {
+      console.error('Failed to add staff:', error);
       res.status(500).json({ error: 'Failed to add staff' });
     }
   });
@@ -894,6 +931,50 @@ export async function createApp() {
     }
   });
 
+  // Booking quick-action (token-based, no login required)
+  app.get('/api/bookings/action/:token', async (req: Request, res: Response) => {
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { actionToken: req.params.token },
+        include: {
+          user: { select: { name: true, phone: true } },
+          salon: { select: { name: true } },
+          staff: { select: { name: true } },
+          services: { include: { service: { select: { name: true } } } }
+        }
+      });
+      if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
+      res.json(booking);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch booking' });
+    }
+  });
+
+  app.post('/api/bookings/action/:token', async (req: Request, res: Response) => {
+    const { action } = req.body;
+    if (!['CONFIRMED', 'CANCELLED'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Use CONFIRMED or CANCELLED.' });
+    }
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { actionToken: req.params.token },
+        include: { salon: true }
+      });
+      if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
+      if (booking.status !== 'PENDING' && booking.status !== 'CONFIRMED') {
+        return res.status(400).json({ error: `Cannot change status from ${booking.status}` });
+      }
+
+      const updated = await prisma.booking.update({
+        where: { id: booking.id },
+        data: { status: action }
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update booking' });
+    }
+  });
+
   // Health
   app.get('/api/health', (req: Request, res: Response) => {
     res.json({ status: 'ok' });
@@ -902,6 +983,8 @@ export async function createApp() {
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
     const { createServer: createViteServer } = await import('vite');
+    const { default: react } = await import('@vitejs/plugin-react');
+    const { default: tailwindcss } = await import('@tailwindcss/vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

@@ -13,6 +13,7 @@ import SalonDetails from './pages/SalonDetails';
 import CustomerDashboard from './pages/CustomerDashboard';
 import SellerDashboard from './pages/SellerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import BookingAction from './pages/BookingAction';
 
 function ProtectedRoute({ children, role }: { children: React.ReactNode, role?: string }) {
   const { user } = useAuthStore();
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/salon/:id" element={<SalonDetails />} />
+          <Route path="/booking/action/:token" element={<BookingAction />} />
           <Route 
             path="/dashboard/customer" 
             element={

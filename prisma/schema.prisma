@@ -152,6 +152,7 @@ model Booking {
 
   status        String @default("PENDING") // PENDING, CONFIRMED, CANCELLED, COMPLETED
   paymentStatus String @default("PENDING") // PENDING, PARTIAL, PAID, REFUNDED
+  actionToken   String? @unique
 
   createdAt     DateTime @default(now())
 
