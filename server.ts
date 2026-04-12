@@ -521,6 +521,16 @@ export async function createApp() {
         },
         include: { variants: true },
       });
+
+      // Auto-link new service to all existing staff in this salon
+      const salonStaff = await prisma.staff.findMany({ where: { salonId: salon.id }, select: { id: true } });
+      if (salonStaff.length > 0) {
+        await prisma.staffService.createMany({
+          data: salonStaff.map(s => ({ staffId: s.id, serviceId: service.id })),
+          skipDuplicates: true,
+        });
+      }
+
       res.json(service);
     } catch (error: any) {
       console.error('Failed to add service:', error);
@@ -534,14 +544,40 @@ export async function createApp() {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
     const { name, skills } = req.body;
     try {
-      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      const salon = await prisma.salon.findFirst({
+        where: { ownerId: req.user.userId },
+        include: { services: true }
+      });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
       
       const staff = await prisma.staff.create({
         data: { name, skills, salonId: salon.id }
       });
+
+      // Auto-create default availability (Mon-Sat, matching salon hours)
+      const availabilityDays = [1, 2, 3, 4, 5, 6]; // Mon-Sat
+      await prisma.staffAvailability.createMany({
+        data: availabilityDays.map(day => ({
+          staffId: staff.id,
+          dayOfWeek: day,
+          startTime: salon.openTime,
+          endTime: salon.closeTime,
+        })),
+      });
+
+      // Auto-link staff to all existing salon services
+      if (salon.services.length > 0) {
+        await prisma.staffService.createMany({
+          data: salon.services.map(svc => ({
+            staffId: staff.id,
+            serviceId: svc.id,
+          })),
+        });
+      }
+
       res.json(staff);
     } catch (error) {
+      console.error('Failed to add staff:', error);
       res.status(500).json({ error: 'Failed to add staff' });
     }
   });
