@@ -8,6 +8,14 @@
   },
   "routes": [
     {
+      "src": "/assets/(.*)",
+      "dest": "/dist/assets/$1"
+    },
+    {
+      "src": "/favicon\\.(svg|ico)",
+      "dest": "/dist/favicon.$1"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.ts"
     },
