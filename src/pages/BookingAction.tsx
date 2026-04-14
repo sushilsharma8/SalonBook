@@ -34,6 +34,17 @@ export default function BookingAction() {
       if (!res.ok) throw new Error(data.error || 'Action failed');
       setBooking({ ...booking, status: data.status });
       setActionDone(action);
+
+      if (booking.user?.phone) {
+        const phone = booking.user.phone.replace(/\D/g, '');
+        const phoneNum = phone.length === 10 ? '91' + phone : phone;
+        const bDate = new Date(booking.startTime);
+        const svcNames = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'your appointment';
+        const msg = action === 'CONFIRMED'
+          ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been confirmed! See you soon!`
+          : `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled. Please contact us to reschedule.`;
+        window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
