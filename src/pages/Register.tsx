@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { Scissors, Sparkles, UserRound, Store } from 'lucide-react';
+import { Scissors, Sparkles, UserRound, Store, Phone } from 'lucide-react';
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -11,17 +11,41 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('CUSTOMER');
   const [error, setError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const { login } = useAuthStore();
   const navigate = useNavigate();
   const isSeller = role === 'SELLER';
 
+  const validatePhone = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (!digits) { setPhoneError('Phone number is required'); return false; }
+    if (digits.length !== 10) { setPhoneError('Enter a valid 10-digit mobile number'); return false; }
+    if (!/^[6-9]/.test(digits)) { setPhoneError('Indian mobile numbers start with 6-9'); return false; }
+    setPhoneError('');
+    return true;
+  };
+
+  const handlePhoneChange = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 10);
+    setPhone(digits);
+    if (digits.length > 0) validatePhone(digits);
+    else setPhoneError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    if (!name.trim()) { setError('Name is required'); return; }
+    if (name.trim().length < 2) { setError('Name must be at least 2 characters'); return; }
+    if (!validatePhone(phone)) return;
+    if (!email.trim()) { setError('Email is required'); return; }
+    if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
+
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone, password, role, gender }),
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), phone, password, role, gender }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -93,8 +117,28 @@ export default function Register() {
         {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 text-sm text-center border border-red-100">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
+            <label className="block text-sm font-medium text-stone-700 mb-2 flex items-center">
+              <Phone className="w-4 h-4 mr-1.5" /> WhatsApp Number <span className="text-red-500 ml-1">*</span>
+            </label>
+            <div className="flex">
+              <span className="inline-flex items-center px-4 py-3.5 rounded-l-xl border border-r-0 border-stone-200 bg-stone-100 text-stone-600 text-sm font-bold">+91</span>
+              <input 
+                type="tel" 
+                required 
+                className={`w-full px-5 py-3.5 rounded-r-xl border focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50 ${phoneError ? 'border-red-300 bg-red-50/30' : 'border-stone-200'}`}
+                value={phone} 
+                onChange={e => handlePhoneChange(e.target.value)} 
+                placeholder={isSeller ? '9876543210' : '9876543210'}
+                maxLength={10}
+                inputMode="numeric"
+              />
+            </div>
+            {phoneError && <p className="text-red-500 text-xs mt-1.5 font-medium">{phoneError}</p>}
+            <p className="text-stone-400 text-xs mt-1">{isSeller ? 'Customers will contact you on this number' : 'Booking confirmations will be sent here'}</p>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-stone-700 mb-2">
-              {isSeller ? 'Owner Name' : 'Full Name'}
+              {isSeller ? 'Owner Name' : 'Full Name'} <span className="text-red-500">*</span>
             </label>
             <input 
               type="text" 
@@ -106,38 +150,30 @@ export default function Register() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">Email</label>
+            <label className="block text-sm font-medium text-stone-700 mb-2">Email <span className="text-red-500">*</span></label>
             <input 
               type="email" 
               required 
               className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50"
               value={email} 
               onChange={e => setEmail(e.target.value)} 
+              placeholder="you@example.com"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">Phone Number</label>
-            <input 
-              type="tel" 
-              required 
-              className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50"
-              value={phone} 
-              onChange={e => setPhone(e.target.value)} 
-              placeholder={isSeller ? 'Business WhatsApp number' : 'e.g. 919876543210'}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">Password</label>
+            <label className="block text-sm font-medium text-stone-700 mb-2">Password <span className="text-red-500">*</span></label>
             <input 
               type="password" 
               required 
+              minLength={6}
               className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50"
               value={password} 
               onChange={e => setPassword(e.target.value)} 
+              placeholder="Min 6 characters"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">Gender</label>
+            <label className="block text-sm font-medium text-stone-700 mb-2">Gender <span className="text-red-500">*</span></label>
             <select
               className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50 appearance-none"
               value={gender}
