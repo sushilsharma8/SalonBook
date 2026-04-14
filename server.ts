@@ -323,8 +323,27 @@ export async function createApp() {
   app.post('/api/auth/register', async (req: Request, res: Response) => {
     try {
       const { name, email, password, role, phone, gender } = req.body;
-      
-      // Restrict roles during registration
+
+      if (!name || String(name).trim().length < 2) {
+        return res.status(400).json({ error: 'Name must be at least 2 characters' });
+      }
+
+      if (!phone) {
+        return res.status(400).json({ error: 'Phone number is required' });
+      }
+      const phoneDigits = String(phone).replace(/\D/g, '');
+      if (phoneDigits.length !== 10 || !/^[6-9]/.test(phoneDigits)) {
+        return res.status(400).json({ error: 'Enter a valid 10-digit Indian mobile number' });
+      }
+
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+        return res.status(400).json({ error: 'Enter a valid email address' });
+      }
+
+      if (!password || String(password).length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
       if (role && !['CUSTOMER', 'SELLER'].includes(role)) {
         return res.status(400).json({ error: 'Invalid role' });
       }
