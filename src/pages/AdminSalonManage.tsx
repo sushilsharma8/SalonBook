@@ -136,6 +136,20 @@ export default function AdminSalonManage() {
       });
       if (res.ok) {
         flash('success', `Booking ${status.toLowerCase()}`);
+
+        const booking = salon?.bookings?.find((b: any) => b.id === bookingId);
+        if (booking?.user?.phone) {
+          const phone = booking.user.phone.replace(/\D/g, '');
+          const phoneNum = phone.length === 10 ? '91' + phone : phone;
+          const bDate = new Date(booking.startTime);
+          const svcNames = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'your appointment';
+          const statusLabel = status === 'CONFIRMED' ? 'confirmed' : status === 'CANCELLED' ? 'cancelled' : 'completed';
+          const msg = status === 'CANCELLED'
+            ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled by the admin. Please contact us for details.`
+            : `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting!'}`;
+          window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
+        }
+
         fetchSalon();
       }
     } catch { flash('error', 'Failed to update booking'); }

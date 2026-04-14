@@ -248,6 +248,19 @@ export default function SellerDashboard() {
       });
       if (res.ok) {
         setBookings(bookings.map(b => b.id === id ? { ...b, status } : b));
+
+        const booking = bookings.find(b => b.id === id);
+        if (booking?.user?.phone) {
+          const phone = booking.user.phone.replace(/\D/g, '');
+          const phoneNum = phone.length === 10 ? '91' + phone : phone;
+          const bDate = new Date(booking.startTime);
+          const services = booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ');
+          const statusLabel = status === 'CONFIRMED' ? 'confirmed' : status === 'CANCELLED' ? 'cancelled' : 'completed';
+          const msg = status === 'CANCELLED'
+            ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled. Please contact us to reschedule.`
+            : `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting us!'}`;
+          window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
+        }
       }
     } catch (err) {
       console.error(err);
