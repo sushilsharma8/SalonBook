@@ -20,14 +20,22 @@ export default function SalonDetails() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   const getEffectiveVariant = (service: any) => {
     const variants = service.variants || [];
     const genderTarget = user?.gender === 'FEMALE' ? 'FEMALE' : user?.gender === 'MALE' ? 'MALE' : null;
     const exact = genderTarget ? variants.find((v: any) => v.targetGender === genderTarget) : null;
     const unisex = variants.find((v: any) => v.targetGender === 'UNISEX');
-    return exact || unisex || variants[0] || null;
+    if (user?.gender === 'OTHER') return unisex || null;
+    if (!user?.gender) return null;
+    return exact || unisex || null;
   };
+
+  const visibleServices = salon?.services?.filter((service: any) => {
+    if (!user?.gender) return true;
+    return Boolean(getEffectiveVariant(service));
+  }) || [];
 
   useEffect(() => {
     fetch(`/api/salons/${id}`)
@@ -76,6 +84,14 @@ export default function SalonDetails() {
 
     fetchSlots();
   }, [salon, selectedServices, selectedDate, token, user?.role]);
+
+  useEffect(() => {
+    setSelectedServices((prev) => prev.filter((service) => visibleServices.some((visible: any) => visible.id === service.id)));
+  }, [user?.gender, salon]);
+
+  useEffect(() => {
+    setSelectedImageIndex(0);
+  }, [salon?.id]);
 
   const handleBook = async () => {
     setErrorMessage(null);
@@ -146,7 +162,16 @@ export default function SalonDetails() {
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
   if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
 
-  const images = salon.images ? JSON.parse(salon.images) : ['https://picsum.photos/seed/salon/800/400'];
+  const images = (() => {
+    if (!salon.images) return ['https://picsum.photos/seed/salon/800/400'];
+    try {
+      const parsed = JSON.parse(salon.images);
+      const usable = Array.isArray(parsed) ? parsed.filter((img) => typeof img === 'string' && img.trim().length > 0) : [];
+      return usable.length ? usable : ['https://picsum.photos/seed/salon/800/400'];
+    } catch {
+      return ['https://picsum.photos/seed/salon/800/400'];
+    }
+  })();
   
   // Generate next 7 days
   const dates = Array.from({ length: 7 }).map((_, i) => addDays(startOfToday(), i));
@@ -169,8 +194,31 @@ export default function SalonDetails() {
       {/* Header */}
       <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm border border-stone-200/60">
         <div className="h-56 md:h-80 overflow-hidden bg-stone-100">
-          <img src={images[0]} alt={salon.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <img
+            src={images[Math.min(selectedImageIndex, images.length - 1)]}
+            alt={`${salon.name} preview`}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
         </div>
+        {images.length > 1 && (
+          <div className="px-6 md:px-10 pt-4 grid grid-cols-4 md:grid-cols-6 gap-2 md:gap-3 bg-white">
+            {images.map((image: string, index: number) => (
+              <button
+                key={`${index}-${image.slice(0, 20)}`}
+                type="button"
+                onClick={() => setSelectedImageIndex(index)}
+                className={`rounded-xl overflow-hidden border-2 transition-all ${
+                  selectedImageIndex === index
+                    ? 'border-stone-900'
+                    : 'border-stone-200 hover:border-stone-300'
+                }`}
+              >
+                <img src={image} alt={`${salon.name} photo ${index + 1}`} className="w-full h-16 md:h-20 object-cover" referrerPolicy="no-referrer" />
+              </button>
+            ))}
+          </div>
+        )}
         <div className="p-6 md:p-10 bg-gradient-to-b from-white to-stone-50/70">
           <h1 className="text-2xl md:text-5xl font-bold text-stone-900 mb-6 font-display tracking-tight">{salon.name}</h1>
           <div className="flex flex-wrap gap-3 md:gap-6 text-stone-600">
@@ -197,11 +245,11 @@ export default function SalonDetails() {
             <div className="flex items-center justify-between mb-6 md:mb-8">
               <h2 className="text-xl md:text-3xl font-bold text-stone-900 font-display tracking-tight">Services</h2>
               <span className="text-xs md:text-sm font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-stone-100 border border-stone-200 text-stone-600">
-                {salon.services.length} listed
+                {visibleServices.length} listed
               </span>
             </div>
             <div className="space-y-4">
-              {salon.services.map((service: any) => {
+              {visibleServices.map((service: any) => {
                 const isSelected = selectedServices.some(s => s.id === service.id);
                 return (
                 <div 
@@ -238,7 +286,11 @@ export default function SalonDetails() {
                   </div>
                 </div>
               )})}
-              {salon.services.length === 0 && <p className="text-stone-500">No services available.</p>}
+              {visibleServices.length === 0 && (
+                <p className="text-stone-500">
+                  No services available for your profile gender.
+                </p>
+              )}
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings } from 'lucide-react';
+import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function AdminDashboard() {
@@ -12,6 +12,12 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'salons'>('dashboard');
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const flash = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 3000);
+  };
 
   useEffect(() => {
     Promise.all([
@@ -49,6 +55,25 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleReactivateUser = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${id}/reactivate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        setUsers(users.map(u => u.id === id ? { ...u, isActive: true } : u));
+        flash('success', 'User account reactivated');
+      } else {
+        flash('error', data?.error || 'Failed to reactivate user');
+      }
+    } catch (err) {
+      console.error(err);
+      flash('error', 'Failed to reactivate user');
+    }
+  };
+
   const handleDeleteSalon = async (id: string) => {
     if (!confirm('Are you sure you want to delete this salon?')) return;
     try {
@@ -59,11 +84,14 @@ export default function AdminDashboard() {
       if (res.ok) {
         setSalons(salons.filter(s => s.id !== id));
         setStats({ ...stats, salons: stats.salons - 1 });
+        flash('success', 'Salon deleted successfully');
       } else {
-        alert('Failed to delete salon');
+        const data = await res.json().catch(() => null);
+        flash('error', data?.error || 'Failed to delete salon');
       }
     } catch (err) {
       console.error(err);
+      flash('error', 'Failed to delete salon');
     }
   };
 
@@ -71,6 +99,13 @@ export default function AdminDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
+      {message && (
+        <div className={`fixed top-20 right-4 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg border ${
+          message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+        }`}>
+          {message.text}
+        </div>
+      )}
       <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h1 className="text-2xl md:text-4xl font-bold text-stone-900 mb-3 font-display tracking-tight">Admin Dashboard</h1>
@@ -205,6 +240,8 @@ export default function AdminDashboard() {
                   <th className="pb-4 font-bold">Name</th>
                   <th className="pb-4 font-bold">Email</th>
                   <th className="pb-4 font-bold">Role</th>
+                  <th className="pb-4 font-bold">Status</th>
+                  <th className="pb-4 font-bold">No-Shows</th>
                   <th className="pb-4 font-bold">Joined</th>
                   <th className="pb-4 font-bold text-right">Actions</th>
                 </tr>
@@ -223,12 +260,27 @@ export default function AdminDashboard() {
                         {u.role}
                       </span>
                     </td>
+                    <td className="py-4">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                        u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {u.isActive ? 'ACTIVE' : 'DEACTIVATED'}
+                      </span>
+                    </td>
+                    <td className="py-4 text-sm font-medium">{u.noShowCount ?? 0}</td>
                     <td className="py-4 text-sm">{new Date(u.createdAt).toLocaleDateString()}</td>
                     <td className="py-4 text-right">
                       {u.role !== 'ADMIN' && (
-                        <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete User">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          {!u.isActive && (
+                            <button onClick={() => handleReactivateUser(u.id)} className="p-2 text-stone-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors" title="Reactivate User">
+                              <RotateCcw className="w-5 h-5" />
+                            </button>
+                          )}
+                          <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete User">
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       )}
                       {u.role === 'ADMIN' && (
                         <span className="p-2 text-stone-300 inline-block" title="Cannot delete admin"><Shield className="w-5 h-5" /></span>
@@ -236,7 +288,7 @@ export default function AdminDashboard() {
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && (<tr><td colSpan={5} className="py-8 text-center text-stone-500">No users found.</td></tr>)}
+                {users.length === 0 && (<tr><td colSpan={7} className="py-8 text-center text-stone-500">No users found.</td></tr>)}
               </tbody>
             </table>
           </div>
@@ -253,11 +305,20 @@ export default function AdminDashboard() {
                       u.role === 'SELLER' ? 'bg-blue-100 text-blue-800' :
                       'bg-stone-100 text-stone-800'
                     }`}>{u.role}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                    }`}>{u.isActive ? 'ACTIVE' : 'DEACTIVATED'}</span>
+                    <span className="text-[10px] text-stone-500">No-show: {u.noShowCount ?? 0}</span>
                     <span className="text-[10px] text-stone-400">{new Date(u.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
                 {u.role !== 'ADMIN' ? (
-                  <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"><Trash2 className="w-4 h-4" /></button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!u.isActive && (
+                      <button onClick={() => handleReactivateUser(u.id)} className="p-2 text-stone-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"><RotateCcw className="w-4 h-4" /></button>
+                    )}
+                    <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                  </div>
                 ) : (
                   <span className="p-2 text-stone-300 shrink-0"><Shield className="w-4 h-4" /></span>
                 )}

@@ -18,7 +18,16 @@ const CATEGORIES = [
   { id: 'fitness', label: 'Fitness & recovery', icon: Dumbbell },
 ];
 
+const getStaffInitial = (name: string) => (name || 'S').trim().charAt(0).toUpperCase();
+
+const getStaffAvatarClasses = (gender?: string | null) => {
+  if (gender === 'MALE') return 'bg-blue-100 text-blue-700 border-blue-200';
+  if (gender === 'FEMALE') return 'bg-pink-100 text-pink-700 border-pink-200';
+  return 'bg-stone-100 text-stone-700 border-stone-200';
+};
+
 export default function SellerDashboard() {
+  const MAX_SALON_IMAGES = 20;
   const { token, user } = useAuthStore();
   const [salon, setSalon] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -29,7 +38,7 @@ export default function SellerDashboard() {
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [showStaffForm, setShowStaffForm] = useState(false);
   
-  const [salonData, setSalonData] = useState({ name: '', address: '', openTime: '09:00', closeTime: '18:00', images: '' });
+  const [salonData, setSalonData] = useState({ name: '', address: '', openTime: '09:00', closeTime: '18:00' });
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [primaryCategory, setPrimaryCategory] = useState<string | null>(null);
   const [relatedCategories, setRelatedCategories] = useState<string[]>([]);
@@ -40,8 +49,10 @@ export default function SellerDashboard() {
       { targetGender: 'FEMALE', price: '', duration: '' },
     ],
   });
+  const [salonError, setSalonError] = useState('');
+  const [uploadingImages, setUploadingImages] = useState(false);
   const [serviceError, setServiceError] = useState('');
-  const [staffData, setStaffData] = useState({ name: '', skills: '' });
+  const [staffData, setStaffData] = useState({ name: '', skills: '', gender: 'OTHER' });
 
   useEffect(() => {
     fetchData();
@@ -65,9 +76,8 @@ export default function SellerDashboard() {
           address: fullSalon.address,
           openTime: fullSalon.openTime,
           closeTime: fullSalon.closeTime,
-          images: parsedImages.filter((img: string) => typeof img === 'string' && img.startsWith('http')).join(', '),
         });
-        setUploadedImages(parsedImages.filter((img: string) => typeof img === 'string' && !img.startsWith('http')));
+        setUploadedImages(parsedImages.filter((img: string) => typeof img === 'string'));
         if (fullSalon.categories) {
           try {
             const parsed = JSON.parse(fullSalon.categories);
@@ -89,40 +99,71 @@ export default function SellerDashboard() {
 
   const handleSalonSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSalonError('');
+
+    if (uploadedImages.length === 0) {
+      setSalonError('Please upload at least one salon photo.');
+      return;
+    }
+
     try {
-      const urlImages = salonData.images.split(',').map(s => s.trim()).filter(Boolean);
       const res = await fetch('/api/seller/salon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           ...salonData,
-          images: JSON.stringify([...urlImages, ...uploadedImages]),
+          images: JSON.stringify(uploadedImages),
           categories: JSON.stringify({ primary: primaryCategory, related: relatedCategories })
         })
       });
       if (res.ok) {
         setShowSalonForm(false);
         fetchData();
+      } else {
+        const data = await res.json().catch(() => null);
+        setSalonError(data?.error || `Failed to save salon (HTTP ${res.status})`);
       }
     } catch (err) {
       console.error(err);
+      setSalonError('Failed to save salon');
     }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+    setSalonError('');
 
-    const dataUrls = await Promise.all(
-      files.map((file) => new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
-      }))
-    );
+    if (uploadedImages.length + files.length > MAX_SALON_IMAGES) {
+      setSalonError(`You can upload up to ${MAX_SALON_IMAGES} photos.`);
+      e.target.value = '';
+      return;
+    }
 
-    setUploadedImages(prev => [...prev, ...dataUrls]);
+    try {
+      setUploadingImages(true);
+      const formData = new FormData();
+      files.forEach((file) => formData.append('images', file));
+
+      const res = await fetch('/api/seller/upload-images', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSalonError(data?.error || `Failed to upload images (HTTP ${res.status})`);
+        return;
+      }
+
+      const uploadedUrls = Array.isArray(data?.urls) ? data.urls.filter((url: unknown) => typeof url === 'string') : [];
+      setUploadedImages(prev => [...prev, ...uploadedUrls]);
+    } catch (err: any) {
+      setSalonError(err?.message || 'Failed to upload selected image(s).');
+    } finally {
+      setUploadingImages(false);
+    }
     e.target.value = '';
   };
 
@@ -205,7 +246,7 @@ export default function SellerDashboard() {
       });
       if (res.ok) {
         setShowStaffForm(false);
-        setStaffData({ name: '', skills: '' });
+        setStaffData({ name: '', skills: '', gender: 'OTHER' });
         fetchData();
       }
     } catch (err) {
@@ -255,9 +296,17 @@ export default function SellerDashboard() {
           const phoneNum = phone.length === 10 ? '91' + phone : phone;
           const bDate = new Date(booking.startTime);
           const services = booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ');
-          const statusLabel = status === 'CONFIRMED' ? 'confirmed' : status === 'CANCELLED' ? 'cancelled' : 'completed';
+          const statusLabel = status === 'CONFIRMED'
+            ? 'confirmed'
+            : status === 'CANCELLED'
+              ? 'cancelled'
+              : status === 'NO_SHOW'
+                ? 'marked as no-show'
+                : 'completed';
           const msg = status === 'CANCELLED'
             ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled. Please contact us to reschedule.`
+            : status === 'NO_SHOW'
+              ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} was marked as no-show.`
             : `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting us!'}`;
           window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
         }
@@ -344,18 +393,27 @@ export default function SellerDashboard() {
                 <input type="time" required className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50" value={salonData.closeTime} onChange={e => setSalonData({...salonData, closeTime: e.target.value})} />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-stone-700 mb-2">Image URLs (comma separated)</label>
-                <input type="text" className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50" value={salonData.images} onChange={e => setSalonData({...salonData, images: e.target.value})} placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-stone-700 mb-2">Or Upload Images</label>
+                <label className="block text-sm font-medium text-stone-700 mb-2">Upload Salon Photos</label>
                 <input
                   type="file"
                   accept="image/*"
                   multiple
                   onChange={handleImageUpload}
+                  disabled={uploadingImages}
                   className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-stone-900 file:text-white hover:file:bg-stone-800"
                 />
+                <p className="mt-2 text-xs text-stone-500">
+                  Upload from your device only. You can select multiple photos and upload again to add more.
+                </p>
+                <p className="mt-1 text-xs text-stone-400">
+                  Up to {MAX_SALON_IMAGES} photos. Each image can be up to 15MB.
+                </p>
+                {uploadingImages && <p className="mt-2 text-xs text-stone-500">Uploading images...</p>}
+                {salonError && (
+                  <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                    {salonError}
+                  </div>
+                )}
                 {uploadedImages.length > 0 && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
                     {uploadedImages.map((img, idx) => (
@@ -531,6 +589,15 @@ export default function SellerDashboard() {
               {showStaffForm && (
                 <form onSubmit={handleStaffSubmit} className="mb-8 space-y-4 bg-stone-50 p-6 rounded-2xl border border-stone-200/60">
                   <input type="text" placeholder="Staff Name" required className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={staffData.name} onChange={e => setStaffData({...staffData, name: e.target.value})} />
+                  <select
+                    className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+                    value={staffData.gender}
+                    onChange={e => setStaffData({ ...staffData, gender: e.target.value })}
+                  >
+                    <option value="MALE">Male</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="OTHER">Other</option>
+                  </select>
                   <input type="text" placeholder="Skills (comma separated)" className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={staffData.skills} onChange={e => setStaffData({...staffData, skills: e.target.value})} />
                   <button type="submit" className="w-full bg-stone-900 text-white py-3.5 rounded-xl font-bold hover:bg-stone-800 transition-colors mt-2">Add Staff</button>
                 </form>
@@ -540,8 +607,8 @@ export default function SellerDashboard() {
                 {salon.staff?.map((s: any) => (
                   <div key={s.id} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-stone-200/60 transition-all hover:border-stone-300 hover:shadow-sm">
                     <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-stone-100 rounded-xl overflow-hidden border border-stone-200 shrink-0">
-                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${s.name}`} alt={s.name} className="w-full h-full object-cover" />
+                      <div className={`w-12 h-12 rounded-xl border shrink-0 flex items-center justify-center font-bold text-base ${getStaffAvatarClasses(s.gender)}`}>
+                        {getStaffInitial(s.name)}
                       </div>
                       <div>
                         <div className="font-bold text-stone-900 text-lg">{s.name}</div>
@@ -586,6 +653,7 @@ export default function SellerDashboard() {
                                 booking.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
                                 booking.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
                                 booking.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                                booking.status === 'NO_SHOW' ? 'bg-orange-100 text-orange-800 border border-orange-200' :
                                 'bg-red-100 text-red-800 border border-red-200'
                               }`}>
                                 {booking.status}
@@ -635,9 +703,14 @@ export default function SellerDashboard() {
                           )}
                           
                           {booking.status === 'CONFIRMED' && (
-                            <button onClick={() => updateBookingStatus(booking.id, 'COMPLETED')} className="w-full md:w-auto px-5 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-sm font-bold transition-colors">
-                              <CheckCircle className="w-4 h-4 mr-1.5 inline" /> Mark Completed
-                            </button>
+                            <div className="w-full md:w-auto flex flex-col md:flex-row gap-2">
+                              <button onClick={() => updateBookingStatus(booking.id, 'COMPLETED')} className="w-full md:w-auto px-5 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-sm font-bold transition-colors">
+                                <CheckCircle className="w-4 h-4 mr-1.5 inline" /> Mark Completed
+                              </button>
+                              <button onClick={() => updateBookingStatus(booking.id, 'NO_SHOW')} className="w-full md:w-auto px-5 py-2.5 bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200 rounded-xl text-sm font-bold transition-colors">
+                                <XCircle className="w-4 h-4 mr-1.5 inline" /> Mark No-Show
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>

@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -43,8 +44,19 @@ function isOverlapping(startA: number, endA: number, startB: number, endB: numbe
   return startA < endB && endA > startB;
 }
 
-function mapUserGenderToServiceTarget(gender: UserGender): ServiceTargetGender {
-  return gender === 'FEMALE' ? 'FEMALE' : 'MALE';
+function mapUserGenderToServiceTarget(gender: UserGender): ServiceTargetGender | null {
+  if (gender === 'FEMALE') return 'FEMALE';
+  if (gender === 'MALE') return 'MALE';
+  return null;
+}
+
+function normalizeUserGender(value: unknown): UserGender | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.toUpperCase();
+  if (normalized === 'MALE' || normalized === 'FEMALE' || normalized === 'OTHER') {
+    return normalized as UserGender;
+  }
+  return null;
 }
 
 type ResolvedServiceVariant = {
@@ -72,7 +84,9 @@ async function resolveServiceVariantsForUser(
 
   const requestedGender = mapUserGenderToServiceTarget(userGender);
   const resolved = services.map((service) => {
-    const exact = service.variants.find((v) => v.targetGender === requestedGender);
+    const exact = requestedGender
+      ? service.variants.find((v) => v.targetGender === requestedGender)
+      : null;
     const fallback = service.variants.find((v) => v.targetGender === 'UNISEX');
     const chosen = exact ?? fallback;
     if (!chosen) {
@@ -313,9 +327,38 @@ async function createBooking(prisma: PrismaClient, data: any) {
 
 export async function createApp() {
   const app = express();
+  const uploadsRoot = path.join(process.cwd(), 'uploads');
+  const salonUploadsDir = path.join(uploadsRoot, 'salons');
+
+  if (!fs.existsSync(salonUploadsDir)) {
+    fs.mkdirSync(salonUploadsDir, { recursive: true });
+  }
+
+  const salonImageUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, salonUploadsDir),
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname) || '.jpg';
+        cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+      },
+    }),
+    limits: {
+      fileSize: 15 * 1024 * 1024,
+      files: 20,
+    },
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only image files are allowed'));
+      }
+    },
+  });
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  app.use('/uploads', express.static(uploadsRoot));
 
   // --- API Routes ---
 
@@ -348,9 +391,13 @@ export async function createApp() {
         return res.status(400).json({ error: 'Invalid role' });
       }
 
+      const normalizedRole = role || 'CUSTOMER';
       const normalizedGender = gender ? String(gender).toUpperCase() : undefined;
       if (normalizedGender && !['MALE', 'FEMALE', 'OTHER'].includes(normalizedGender)) {
         return res.status(400).json({ error: 'Invalid gender' });
+      }
+      if (normalizedRole === 'CUSTOMER' && !normalizedGender) {
+        return res.status(400).json({ error: 'Gender is required for customer signup' });
       }
 
       const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -363,9 +410,9 @@ export async function createApp() {
           name,
           email,
           password: hashedPassword,
-          role: role || 'CUSTOMER',
+          role: normalizedRole,
           phone,
-          gender: (normalizedGender as UserGender | undefined) ?? null,
+          gender: normalizedRole === 'CUSTOMER' ? (normalizedGender as UserGender | undefined) ?? null : null,
         },
       });
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
@@ -383,6 +430,7 @@ export async function createApp() {
       const { email, password } = req.body;
       const user = await prisma.user.findUnique({ where: { email } });
       if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+      if (!user.isActive) return res.status(403).json({ error: 'Your account is deactivated. Please contact support.' });
       
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
@@ -398,12 +446,22 @@ export async function createApp() {
   });
 
   // Middleware to check auth
-  const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      req.user = payload;
+      const payload = jwt.verify(token, JWT_SECRET) as { userId: string; role: string };
+      const activeUser = await prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { isActive: true, role: true },
+      });
+      if (!activeUser) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+      if (!activeUser.isActive) {
+        return res.status(403).json({ error: 'Your account is deactivated. Please contact support.' });
+      }
+      req.user = { userId: payload.userId, role: activeUser.role };
       next();
     } catch (err) {
       res.status(401).json({ error: 'Invalid token' });
@@ -430,6 +488,7 @@ export async function createApp() {
         include: { 
           services: { include: { variants: true } }, 
           staff: {
+            where: { isActive: true },
             include: { services: true }
           }, 
           reviews: {
@@ -455,7 +514,10 @@ export async function createApp() {
     try {
       const salon = await prisma.salon.findFirst({
         where: { ownerId: req.user.userId },
-        include: { services: { include: { variants: true } }, staff: true }
+        include: {
+          services: { include: { variants: true } },
+          staff: { where: { isActive: true } }
+        }
       });
       res.json(salon || null);
     } catch (error) {
@@ -484,6 +546,30 @@ export async function createApp() {
     } catch (error) {
       res.status(500).json({ error: 'Failed to save salon' });
     }
+  });
+
+  app.post('/api/seller/upload-images', requireAuth, (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+
+    salonImageUpload.array('images', 20)(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Each image must be 15MB or smaller' });
+        }
+        return res.status(400).json({ error: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ error: err.message || 'Upload failed' });
+      }
+
+      const files = (req.files as Express.Multer.File[] | undefined) || [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: 'No images uploaded' });
+      }
+
+      const urls = files.map((file) => `/uploads/salons/${file.filename}`);
+      return res.json({ urls });
+    });
   });
 
   // Seller: Manage Services
@@ -561,8 +647,13 @@ export async function createApp() {
   // Seller: Manage Staff
   app.post('/api/seller/staff', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
-    const { name, skills } = req.body;
+    const { name, skills, gender } = req.body;
     try {
+      const normalizedGender = normalizeUserGender(gender);
+      if (gender && !normalizedGender) {
+        return res.status(400).json({ error: 'Invalid gender. Use MALE, FEMALE, or OTHER.' });
+      }
+
       const salon = await prisma.salon.findFirst({
         where: { ownerId: req.user.userId },
         include: { services: true }
@@ -570,7 +661,7 @@ export async function createApp() {
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
       
       const staff = await prisma.staff.create({
-        data: { name, skills, salonId: salon.id }
+        data: { name, skills, gender: normalizedGender, salonId: salon.id }
       });
 
       // Auto-create default availability (Mon-Sat, matching salon hours)
@@ -621,12 +712,25 @@ export async function createApp() {
     try {
       const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
-      
-      await prisma.staff.deleteMany({
+
+      const staff = await prisma.staff.findFirst({
         where: { id: req.params.id, salonId: salon.id }
       });
+      if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+      await prisma.$transaction(async (tx) => {
+        await tx.staffAvailability.deleteMany({ where: { staffId: staff.id } });
+        await tx.staffTimeOff.deleteMany({ where: { staffId: staff.id } });
+        await tx.staffService.deleteMany({ where: { staffId: staff.id } });
+        await tx.staff.update({
+          where: { id: staff.id },
+          data: { isActive: false },
+        });
+      });
+
       res.json({ success: true });
     } catch (error) {
+      console.error('Failed to delete staff:', error);
       res.status(500).json({ error: 'Failed to delete staff' });
     }
   });
@@ -735,6 +839,10 @@ export async function createApp() {
 
   app.put('/api/bookings/:id/status', requireAuth, async (req: Request, res: Response) => {
     const { status } = req.body;
+    const allowedStatuses = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'];
+    if (!allowedStatuses.includes(String(status))) {
+      return res.status(400).json({ error: 'Invalid booking status' });
+    }
     try {
       const booking = await prisma.booking.findUnique({
         where: { id: req.params.id },
@@ -757,11 +865,36 @@ export async function createApp() {
         return res.status(403).json({ error: 'Customers can only cancel bookings' });
       }
 
-      const updatedBooking = await prisma.booking.update({
-        where: { id: req.params.id },
-        data: { status }
+      const result = await prisma.$transaction(async (tx) => {
+        const updatedBooking = await tx.booking.update({
+          where: { id: req.params.id },
+          data: { status }
+        });
+
+        if (status !== 'NO_SHOW' || booking.status === 'NO_SHOW') {
+          return { updatedBooking, accountDeactivated: false };
+        }
+
+        const noShowCount = await tx.booking.count({
+          where: { userId: booking.userId, status: 'NO_SHOW' },
+        });
+
+        if (noShowCount > 3) {
+          await tx.user.update({
+            where: { id: booking.userId },
+            data: { isActive: false, noShowCount },
+          });
+          return { updatedBooking, accountDeactivated: true, noShowCount };
+        }
+
+        await tx.user.update({
+          where: { id: booking.userId },
+          data: { noShowCount },
+        });
+        return { updatedBooking, accountDeactivated: false, noShowCount };
       });
-      res.json(updatedBooking);
+
+      res.json(result);
     } catch (error) {
       res.status(500).json({ error: 'Failed to update booking' });
     }
@@ -865,12 +998,32 @@ export async function createApp() {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
     try {
       const users = await prisma.user.findMany({
-        select: { id: true, name: true, email: true, role: true, createdAt: true },
+        select: { id: true, name: true, email: true, role: true, isActive: true, noShowCount: true, createdAt: true },
         orderBy: { createdAt: 'desc' }
       });
       res.json(users);
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  // Admin: Reactivate user account
+  app.post('/api/admin/users/:id/reactivate', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.role === 'ADMIN') return res.status(400).json({ error: 'Admin accounts cannot be reactivated via this endpoint' });
+
+      const updatedUser = await prisma.user.update({
+        where: { id: req.params.id },
+        data: { isActive: true },
+        select: { id: true, isActive: true, noShowCount: true },
+      });
+
+      res.json({ success: true, user: updatedUser });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to reactivate user' });
     }
   });
 
@@ -899,6 +1052,9 @@ export async function createApp() {
             // Delete salon related records
             await tx.booking.deleteMany({ where: { salonId: { in: salonIds } } });
             await tx.review.deleteMany({ where: { salonId: { in: salonIds } } });
+            await tx.staffAvailability.deleteMany({ where: { staff: { salonId: { in: salonIds } } } });
+            await tx.staffTimeOff.deleteMany({ where: { staff: { salonId: { in: salonIds } } } });
+            await tx.staffService.deleteMany({ where: { staff: { salonId: { in: salonIds } } } });
             await tx.service.deleteMany({ where: { salonId: { in: salonIds } } });
             await tx.staff.deleteMany({ where: { salonId: { in: salonIds } } });
             // Delete salons
@@ -939,6 +1095,9 @@ export async function createApp() {
         const salonId = req.params.id;
         await tx.booking.deleteMany({ where: { salonId } });
         await tx.review.deleteMany({ where: { salonId } });
+        await tx.staffAvailability.deleteMany({ where: { staff: { salonId } } });
+        await tx.staffTimeOff.deleteMany({ where: { staff: { salonId } } });
+        await tx.staffService.deleteMany({ where: { staff: { salonId } } });
         await tx.service.deleteMany({ where: { salonId } });
         await tx.staff.deleteMany({ where: { salonId } });
         await tx.salon.delete({ where: { id: salonId } });
@@ -959,7 +1118,7 @@ export async function createApp() {
         include: {
           owner: { select: { name: true, email: true, phone: true } },
           services: { include: { variants: true } },
-          staff: true,
+          staff: { where: { isActive: true } },
           bookings: {
             include: { user: { select: { name: true, phone: true } }, services: { include: { service: true } }, staff: true },
             orderBy: { startTime: 'desc' },
@@ -1041,12 +1200,17 @@ export async function createApp() {
   // Admin: Add staff to any salon
   app.post('/api/admin/salons/:id/staff', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
-    const { name, skills } = req.body;
+    const { name, skills, gender } = req.body;
     try {
+      const normalizedGender = normalizeUserGender(gender);
+      if (gender && !normalizedGender) {
+        return res.status(400).json({ error: 'Invalid gender. Use MALE, FEMALE, or OTHER.' });
+      }
+
       const salon = await prisma.salon.findUnique({ where: { id: req.params.id }, include: { services: true } });
       if (!salon) return res.status(404).json({ error: 'Salon not found' });
 
-      const staff = await prisma.staff.create({ data: { name, skills, salonId: req.params.id } });
+      const staff = await prisma.staff.create({ data: { name, skills, gender: normalizedGender, salonId: req.params.id } });
 
       const availabilityDays = [1, 2, 3, 4, 5, 6];
       await prisma.staffAvailability.createMany({
@@ -1070,9 +1234,24 @@ export async function createApp() {
   app.delete('/api/admin/salons/:salonId/staff/:staffId', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
     try {
-      await prisma.staff.deleteMany({ where: { id: req.params.staffId, salonId: req.params.salonId } });
+      const staff = await prisma.staff.findFirst({
+        where: { id: req.params.staffId, salonId: req.params.salonId }
+      });
+      if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+      await prisma.$transaction(async (tx) => {
+        await tx.staffAvailability.deleteMany({ where: { staffId: staff.id } });
+        await tx.staffTimeOff.deleteMany({ where: { staffId: staff.id } });
+        await tx.staffService.deleteMany({ where: { staffId: staff.id } });
+        await tx.staff.update({
+          where: { id: staff.id },
+          data: { isActive: false },
+        });
+      });
+
       res.json({ success: true });
     } catch (error) {
+      console.error('Failed to delete staff (admin):', error);
       res.status(500).json({ error: 'Failed to delete staff' });
     }
   });

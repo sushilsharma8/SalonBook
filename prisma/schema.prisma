@@ -32,6 +32,8 @@ model User {
   gender    UserGender?
   email     String?  @unique
   password  String   @default("")
+  isActive  Boolean  @default(true)
+  noShowCount Int    @default(0)
   createdAt DateTime @default(now())
 
   salons    Salon[]  @relation("OwnerSalons")
@@ -66,6 +68,7 @@ model Staff {
   salon     Salon    @relation(fields: [salonId], references: [id])
 
   name      String
+  gender    UserGender?
   skills    String?
   isActive  Boolean  @default(true)
 

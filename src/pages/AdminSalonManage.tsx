@@ -4,6 +4,14 @@ import { useAuthStore } from '../store/useAuthStore';
 import { format } from 'date-fns';
 import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle } from 'lucide-react';
 
+const getStaffInitial = (name: string) => (name || 'S').trim().charAt(0).toUpperCase();
+
+const getStaffAvatarClasses = (gender?: string | null) => {
+  if (gender === 'MALE') return 'bg-blue-100 text-blue-700 border-blue-200';
+  if (gender === 'FEMALE') return 'bg-pink-100 text-pink-700 border-pink-200';
+  return 'bg-stone-100 text-stone-700 border-stone-200';
+};
+
 export default function AdminSalonManage() {
   const { id } = useParams<{ id: string }>();
   const { token } = useAuthStore();
@@ -25,7 +33,7 @@ export default function AdminSalonManage() {
   });
 
   const [showStaffForm, setShowStaffForm] = useState(false);
-  const [staffForm, setStaffForm] = useState({ name: '', skills: '' });
+  const [staffForm, setStaffForm] = useState({ name: '', skills: '', gender: 'OTHER' });
 
   const fetchSalon = async () => {
     try {
@@ -113,7 +121,7 @@ export default function AdminSalonManage() {
       if (!res.ok) throw new Error('Failed');
       flash('success', 'Staff added');
       setShowStaffForm(false);
-      setStaffForm({ name: '', skills: '' });
+      setStaffForm({ name: '', skills: '', gender: 'OTHER' });
       fetchSalon();
     } catch { flash('error', 'Failed to add staff'); }
   };
@@ -271,6 +279,15 @@ export default function AdminSalonManage() {
           {showStaffForm && (
             <form onSubmit={handleAddStaff} className="mb-6 space-y-3 bg-stone-50 p-4 rounded-xl border border-stone-200/60">
               <input type="text" placeholder="Staff Name" required className="w-full px-4 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm" value={staffForm.name} onChange={e => setStaffForm({ ...staffForm, name: e.target.value })} />
+              <select
+                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm"
+                value={staffForm.gender}
+                onChange={e => setStaffForm({ ...staffForm, gender: e.target.value })}
+              >
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+              </select>
               <input type="text" placeholder="Skills (comma separated)" className="w-full px-4 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm" value={staffForm.skills} onChange={e => setStaffForm({ ...staffForm, skills: e.target.value })} />
               <button type="submit" className="w-full bg-stone-900 text-white py-2.5 rounded-xl font-bold text-sm hover:bg-stone-800">Add Staff</button>
             </form>
@@ -279,8 +296,8 @@ export default function AdminSalonManage() {
             {salon.staff?.map((s: any) => (
               <div key={s.id} className="flex items-center justify-between p-3 bg-stone-50 rounded-xl border border-stone-100">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-stone-200 rounded-xl overflow-hidden border border-stone-300 shrink-0">
-                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${s.name}`} alt={s.name} className="w-full h-full" />
+                  <div className={`w-10 h-10 rounded-xl border shrink-0 flex items-center justify-center font-bold text-sm ${getStaffAvatarClasses(s.gender)}`}>
+                    {getStaffInitial(s.name)}
                   </div>
                   <div>
                     <div className="font-bold text-stone-900 text-sm">{s.name}</div>

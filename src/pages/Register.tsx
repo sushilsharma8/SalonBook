@@ -7,7 +7,7 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [gender, setGender] = useState('MALE');
+  const [gender, setGender] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('CUSTOMER');
   const [error, setError] = useState('');
@@ -40,12 +40,22 @@ export default function Register() {
     if (!validatePhone(phone)) return;
     if (!email.trim()) { setError('Email is required'); return; }
     if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
+    if (!isSeller && !gender) { setError('Please select gender to continue'); return; }
+
+    const payload = {
+      name: name.trim(),
+      email: email.trim(),
+      phone,
+      password,
+      role,
+      gender: isSeller ? undefined : gender,
+    };
 
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), phone, password, role, gender }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -172,18 +182,22 @@ export default function Register() {
               placeholder="Min 6 characters"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-stone-700 mb-2">Gender <span className="text-red-500">*</span></label>
-            <select
-              className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50 appearance-none"
-              value={gender}
-              onChange={e => setGender(e.target.value)}
-            >
-              <option value="MALE">Male</option>
-              <option value="FEMALE">Female</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
+          {!isSeller && (
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">Gender <span className="text-red-500">*</span></label>
+              <select
+                required
+                className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent transition-all outline-none bg-stone-50/50 appearance-none"
+                value={gender}
+                onChange={e => setGender(e.target.value)}
+              >
+                <option value="">Select gender</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+          )}
           <button type="submit" className={`w-full py-4 rounded-xl font-medium transition-colors shadow-sm mt-4 ${
             isSeller ? 'bg-stone-900 text-white hover:bg-stone-800' : 'bg-amber-500 text-stone-900 hover:bg-amber-400'
           }`}>
