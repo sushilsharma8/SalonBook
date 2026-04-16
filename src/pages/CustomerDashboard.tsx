@@ -64,6 +64,23 @@ export default function CustomerDashboard() {
       });
       if (res.ok) {
         setBookings(bookings.map(b => b.id === id ? { ...b, status: 'CANCELLED' } : b));
+
+        const booking = bookings.find((b) => b.id === id);
+        const ownerPhoneRaw = booking?.salon?.owner?.phone;
+        if (ownerPhoneRaw) {
+          const phone = String(ownerPhoneRaw).replace(/\D/g, '');
+          const phoneNum = phone.length === 10 ? '91' + phone : phone;
+          const bDate = booking?.startTime ? new Date(booking.startTime) : null;
+          const services = Array.isArray(booking?.services)
+            ? booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).filter(Boolean).join(', ')
+            : '';
+          const msg =
+            `Hello ${booking?.salon?.owner?.name || 'there'}, the customer ${user?.name || ''} has cancelled their booking` +
+            `${services ? ` for ${services}` : ''}` +
+            `${booking?.salon?.name ? ` at ${booking.salon.name}` : ''}` +
+            `${bDate ? ` on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')}` : ''}.`;
+          window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
+        }
       }
     } catch (err) {
       console.error(err);

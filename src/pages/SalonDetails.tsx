@@ -57,6 +57,7 @@ export default function SalonDetails() {
   useEffect(() => {
     if (!salon || selectedServices.length === 0 || !selectedDate || !token || user?.role !== 'CUSTOMER') {
       setTimeSlots([]);
+      setErrorMessage(null);
       return;
     }
 
@@ -71,12 +72,15 @@ export default function SalonDetails() {
         const data = await res.json();
         if (res.ok) {
           setTimeSlots(data.slots || []);
+          setErrorMessage(null);
         } else {
           setTimeSlots([]);
+          setErrorMessage(data?.error || 'Failed to fetch slots');
         }
       } catch (err) {
         console.error(err);
         setTimeSlots([]);
+        setErrorMessage('Failed to fetch slots');
       } finally {
         setSlotsLoading(false);
       }

@@ -120,6 +120,14 @@ async function getAvailableSlots(
   const services = await resolveServiceVariantsForUser(prisma, serviceIds, userGender);
   const duration = services.reduce((acc, s) => acc + s.duration, 0);
 
+  const salon = await prisma.salon.findUnique({
+    where: { id: salonId },
+    select: { openTime: true, closeTime: true },
+  });
+  if (!salon) {
+    throw new Error('Salon not found');
+  }
+
   const staffList = await prisma.staff.findMany({
     where: {
       salonId,
@@ -144,11 +152,20 @@ async function getAvailableSlots(
   let slotMap = new Map<string, boolean>();
 
   for (const staff of staffList) {
-    const availability = staff.availability.find(a => a.dayOfWeek === day);
+    // Support both 0-6 (Sun-Sat) and 1-7 (Mon-Sun) encodings in existing DBs.
+    const legacyDay = day === 0 ? 7 : day;
+    const availability =
+      staff.availability.find((a) => a.dayOfWeek === day) ??
+      staff.availability.find((a) => a.dayOfWeek === legacyDay) ??
+      // Back-compat fallback: if no availability rows exist at all, assume salon hours.
+      (staff.availability.length === 0
+        ? { dayOfWeek: day, startTime: salon.openTime, endTime: salon.closeTime }
+        : undefined);
     if (!availability) continue;
 
     let start = timeToMinutes(availability.startTime);
     let end = timeToMinutes(availability.endTime);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) continue;
 
     const bookings = staff.bookings.filter(b => {
       // Compare dates using UTC to avoid timezone issues
@@ -322,6 +339,10 @@ async function createBooking(prisma: PrismaClient, data: any) {
         }
       }
     });
+  }, {
+    // Booking assignment may scan multiple staff/conflicts; default 5s is too tight.
+    maxWait: 10_000,
+    timeout: 20_000,
   });
 }
 
