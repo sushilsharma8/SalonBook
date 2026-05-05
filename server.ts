@@ -10,6 +10,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 dotenv.config();
 
@@ -27,6 +29,22 @@ const __dirname = moduleUrl.startsWith('file:')
   : process.cwd();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'salon-images';
+const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER || 'salons';
+
+let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
+function getSupabaseAdminClient() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null;
+  if (!supabaseAdminClient) {
+    supabaseAdminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+      realtime: { transport: ws as unknown as typeof WebSocket },
+    });
+  }
+  return supabaseAdminClient;
+}
 
 // --- Utility Functions for Slot Engine ---
 function timeToMinutes(time: string) {
@@ -348,7 +366,11 @@ async function createBooking(prisma: PrismaClient, data: any) {
 
 export async function createApp() {
   const app = express();
-  const uploadsRoot = path.join(process.cwd(), 'uploads');
+  // Serverless runtimes (e.g. Vercel) expose a read-only app directory.
+  // Use /tmp for runtime uploads so multipart requests do not fail with EROFS.
+  const uploadsRoot = process.env.VERCEL === '1'
+    ? path.join('/tmp', 'uploads')
+    : path.join(process.cwd(), 'uploads');
   const salonUploadsDir = path.join(uploadsRoot, 'salons');
 
   if (!fs.existsSync(salonUploadsDir)) {
@@ -572,7 +594,7 @@ export async function createApp() {
   app.post('/api/seller/upload-images', requireAuth, (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
 
-    salonImageUpload.array('images', 20)(req, res, (err) => {
+    salonImageUpload.array('images', 20)(req, res, async (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({ error: 'Each image must be 15MB or smaller' });
@@ -586,6 +608,48 @@ export async function createApp() {
       const files = (req.files as Express.Multer.File[] | undefined) || [];
       if (files.length === 0) {
         return res.status(400).json({ error: 'No images uploaded' });
+      }
+
+      const supabaseAdmin = getSupabaseAdminClient();
+      if (supabaseAdmin) {
+        const urls: string[] = [];
+
+        try {
+          for (const file of files) {
+            const ext = path.extname(file.originalname) || path.extname(file.filename) || '.jpg';
+            const objectPath = `${SUPABASE_STORAGE_FOLDER}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+            const fileBuffer = await fs.promises.readFile(file.path);
+
+            const { error: uploadError } = await supabaseAdmin.storage
+              .from(SUPABASE_STORAGE_BUCKET)
+              .upload(objectPath, fileBuffer, {
+                contentType: file.mimetype || 'application/octet-stream',
+                upsert: false,
+              });
+
+            if (uploadError) {
+              throw new Error(uploadError.message);
+            }
+
+            const { data } = supabaseAdmin.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(objectPath);
+            urls.push(data.publicUrl);
+          }
+
+          return res.json({ urls });
+        } catch (uploadError: any) {
+          return res.status(500).json({ error: uploadError?.message || 'Failed to upload images to Supabase Storage' });
+        } finally {
+          await Promise.all(
+            files.map(async (file) => {
+              if (!file.path) return;
+              try {
+                await fs.promises.unlink(file.path);
+              } catch {
+                // Best-effort cleanup for temporary local upload files.
+              }
+            })
+          );
+        }
       }
 
       const urls = files.map((file) => `/uploads/salons/${file.filename}`);

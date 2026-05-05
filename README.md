@@ -27,6 +27,9 @@ SalonBook is a full-stack salon booking app with:
    - `JWT_SECRET` (long random string)
    - `GEMINI_API_KEY` (if needed)
    - `APP_URL` (optional for local dev)
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (recommended for persistent image uploads)
+   - `SUPABASE_STORAGE_BUCKET` (optional, defaults to `salon-images`)
+   - `SUPABASE_STORAGE_FOLDER` (optional, defaults to `salons`)
 
 ## Local Development
 
@@ -60,6 +63,16 @@ Before deploying, set these environment variables in Vercel project settings:
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `GEMINI_API_KEY` (if required)
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_STORAGE_BUCKET` (optional)
+- `SUPABASE_STORAGE_FOLDER` (optional)
+
+## Image Upload Storage
+
+- `POST /api/seller/upload-images` uses Supabase Storage when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured.
+- Without Supabase config, the server falls back to local disk (`uploads`) in dev and `/tmp/uploads` on Vercel.
+- For production, Supabase Storage is strongly recommended because local/serverless file systems are not durable.
 
 Deploy:
 
