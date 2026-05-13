@@ -4,6 +4,25 @@ import { format } from 'date-fns';
 import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+/** Title-case words for display (fixes all-lowercase copy from seed/API). */
+function toTitleCase(value: string | undefined | null): string {
+  if (value == null || value === '') return '';
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((word) =>
+      word
+        .split('-')
+        .map((segment) =>
+          segment.length === 0
+            ? segment
+            : segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase()
+        )
+        .join('-')
+    )
+    .join(' ');
+}
+
 export default function CustomerDashboard() {
   const { token, user, setAuth } = useAuthStore();
   const [bookings, setBookings] = useState<any[]>([]);
@@ -344,14 +363,16 @@ export default function CustomerDashboard() {
                         {booking.status}
                       </span>
                       <span className="font-bold text-lg md:text-xl text-stone-900 font-display">
-                        {booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}
+                        {booking.services
+                          .map((s: any) => toTitleCase(s.serviceNameAtBooking || s.service?.name))
+                          .join(', ')}
                       </span>
                     </div>
                     
                     <div className="text-stone-600 space-y-1.5 md:space-y-2 text-xs md:text-sm">
                       <div className="flex items-center space-x-2">
                         <MapPin className="w-3.5 h-3.5 md:w-4 md:h-4 text-stone-400" />
-                        <span className="font-medium text-stone-800">{booking.salon.name}</span>
+                        <span className="font-medium text-stone-800">{toTitleCase(booking.salon.name)}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Calendar className="w-3.5 h-3.5 md:w-4 md:h-4 text-stone-400" />
@@ -359,7 +380,9 @@ export default function CustomerDashboard() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Clock className="w-3.5 h-3.5 md:w-4 md:h-4 text-stone-400" />
-                        <span>{format(bookingDate, 'h:mm a')} (with {booking.staff.name})</span>
+                        <span>
+                          {format(bookingDate, 'h:mm a')} (with {toTitleCase(booking.staff?.name)})
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -372,7 +395,7 @@ export default function CustomerDashboard() {
                     <div className="flex flex-wrap md:flex-col gap-2 justify-end">
                       {isUpcoming && booking.salon.owner?.phone && (
                         <a 
-                          href={`https://wa.me/${booking.salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + booking.salon.owner.phone.replace(/\D/g, '') : booking.salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${booking.salon.owner.name}, I have an upcoming appointment at ${booking.salon.name} for ${format(bookingDate, 'MMM d, yyyy')} at ${format(bookingDate, 'h:mm a')}.`)}`}
+                          href={`https://wa.me/${booking.salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + booking.salon.owner.phone.replace(/\D/g, '') : booking.salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${toTitleCase(booking.salon.owner.name)}, I have an upcoming appointment at ${toTitleCase(booking.salon.name)} for ${format(bookingDate, 'MMM d, yyyy')} at ${format(bookingDate, 'h:mm a')}.`)}`}
                           target="_blank" 
                           rel="noreferrer" 
                           className="text-white bg-[#25D366] hover:bg-[#128C7E] px-3 md:px-5 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-semibold transition-colors flex items-center justify-center shadow-sm"

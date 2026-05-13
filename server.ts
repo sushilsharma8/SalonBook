@@ -291,6 +291,19 @@ async function createBooking(prisma: PrismaClient, data: any) {
 
     const resolvedStaffId = await resolveStaffId();
 
+    // Stale checkout holds (>15 min) are ignored when computing conflicts and slots, but rows
+    // still exist — @@unique([staffId, startTime]) would fail without releasing them here.
+    await tx.booking.updateMany({
+      where: {
+        staffId: resolvedStaffId,
+        status: 'PENDING',
+        createdAt: { lte: fifteenMinsAgo },
+        startTime: { lt: endTime },
+        endTime: { gt: startDate },
+      },
+      data: { status: 'CANCELLED' },
+    });
+
     // Double-check conflict even when staffId was provided (race condition safety)
     const conflict = await tx.booking.findFirst({
       where: {
