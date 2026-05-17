@@ -1,5 +1,4 @@
 
-
 # SalonBook
 
 SalonBook is a full-stack salon booking app with:
