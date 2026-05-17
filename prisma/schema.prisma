@@ -60,6 +60,19 @@ model Salon {
   services   Service[]
   bookings   Booking[]
   reviews    Review[]
+  hours      SalonHours[]
+}
+
+model SalonHours {
+  id        String  @id @default(uuid())
+  salonId   String
+  salon     Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  dayOfWeek Int     // 0 = Sunday … 6 = Saturday
+  isOpen    Boolean @default(true)
+  startTime String
+  endTime   String
+
+  @@unique([salonId, dayOfWeek])
 }
 
 model Staff {

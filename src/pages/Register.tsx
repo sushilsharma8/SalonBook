@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { Scissors, Sparkles, UserRound, Store, Phone } from 'lucide-react';
+import { Button } from '../components/ui/Button';
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -12,6 +13,7 @@ export default function Register() {
   const [role, setRole] = useState('CUSTOMER');
   const [error, setError] = useState('');
   const [phoneError, setPhoneError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
   const navigate = useNavigate();
   const isSeller = role === 'SELLER';
@@ -51,6 +53,7 @@ export default function Register() {
       gender: isSeller ? undefined : gender,
     };
 
+    setLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -64,6 +67,8 @@ export default function Register() {
       navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -198,11 +203,20 @@ export default function Register() {
               </select>
             </div>
           )}
-          <button type="submit" className={`w-full py-4 rounded-xl font-medium transition-colors shadow-sm mt-4 ${
-            isSeller ? 'bg-stone-900 text-white hover:bg-stone-800' : 'bg-amber-500 text-stone-900 hover:bg-amber-400'
-          }`}>
-            {isSeller ? 'Create Seller Account' : 'Create Customer Account'}
-          </button>
+          <Button
+            type="submit"
+            variant={isSeller ? 'primary' : 'amber'}
+            size="lg"
+            fullWidth
+            loading={loading}
+            className="mt-4"
+          >
+            {loading
+              ? 'Creating account…'
+              : isSeller
+                ? 'Create Seller Account'
+                : 'Create Customer Account'}
+          </Button>
         </form>
         <p className="mt-8 text-center text-stone-500">
           Already have an account? <Link to="/login" className="text-stone-900 font-semibold hover:underline">Sign in</Link>

@@ -53,7 +53,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               ) : (
                 <>
                   <Link to="/login" className="text-stone-600 hover:text-stone-900 font-medium transition-colors">Login</Link>
-                  <Link to="/register" className="bg-stone-900 text-white px-5 py-2 rounded-full font-medium hover:bg-stone-800 transition-colors">
+                  <Link to="/register" className="btn-interactive bg-stone-900 text-white px-5 py-2 rounded-full font-medium hover:bg-stone-800">
                     Sign Up
                   </Link>
                 </>
@@ -101,13 +101,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <div className="grid grid-cols-2 gap-3 pt-2">
                     <Link 
                       to="/login" 
-                      className="flex items-center justify-center px-4 py-3 rounded-xl text-stone-600 bg-stone-50 font-bold"
+                      className="btn-interactive flex items-center justify-center px-4 py-3 rounded-xl text-stone-600 bg-stone-50 font-bold"
                     >
                       Login
                     </Link>
                     <Link 
                       to="/register" 
-                      className="flex items-center justify-center px-4 py-3 rounded-xl bg-stone-900 text-white font-bold"
+                      className="btn-interactive flex items-center justify-center px-4 py-3 rounded-xl bg-stone-900 text-white font-bold"
                     >
                       Sign Up
                     </Link>

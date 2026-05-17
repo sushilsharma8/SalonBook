@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard } from 'lucide-react';
-import { format, addDays, startOfToday } from 'date-fns';
+import { format, addDays, startOfToday, isSameDay } from 'date-fns';
+import { isSalonOpenOnDate, normalizeWeeklyHoursFromApi } from '../lib/salonHours';
 
 export default function SalonDetails() {
   const { id } = useParams();
@@ -17,6 +18,7 @@ export default function SalonDetails() {
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [bookingLoading, setBookingLoading] = useState(false);
   const [timeSlots, setTimeSlots] = useState<{ time: string, available: boolean }[]>([]);
+  const [slotsReason, setSlotsReason] = useState<string | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export default function SalonDetails() {
   useEffect(() => {
     if (!salon || selectedServices.length === 0 || !selectedDate || !token || user?.role !== 'CUSTOMER') {
       setTimeSlots([]);
+      setSlotsReason(null);
       setErrorMessage(null);
       return;
     }
@@ -72,9 +75,11 @@ export default function SalonDetails() {
         const data = await res.json();
         if (res.ok) {
           setTimeSlots(data.slots || []);
+          setSlotsReason(data.reason === 'NO_STAFF' ? data.message : null);
           setErrorMessage(null);
         } else {
           setTimeSlots([]);
+          setSlotsReason(null);
           setErrorMessage(data?.error || 'Failed to fetch slots');
         }
       } catch (err) {
@@ -177,8 +182,20 @@ export default function SalonDetails() {
     }
   })();
   
-  // Generate next 7 days
-  const dates = Array.from({ length: 7 }).map((_, i) => addDays(startOfToday(), i));
+  const weeklyHours = useMemo(() => {
+    if (!salon) return null;
+    return normalizeWeeklyHoursFromApi(salon.hours, salon.openTime, salon.closeTime);
+  }, [salon]);
+
+  const dates = Array.from({ length: 14 }).map((_, i) => addDays(startOfToday(), i));
+
+  useEffect(() => {
+    if (!weeklyHours) return;
+    if (!isSalonOpenOnDate(weeklyHours, selectedDate)) {
+      const nextOpen = dates.find((d) => isSalonOpenOnDate(weeklyHours, d));
+      if (nextOpen) setSelectedDate(nextOpen);
+    }
+  }, [weeklyHours, salon?.id]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-24 lg:pb-8">
@@ -371,20 +388,28 @@ export default function SalonDetails() {
                     <CalendarIcon className="w-4 h-4 mr-2" /> Select Date
                   </label>
                   <div className="flex space-x-2 md:space-x-3 overflow-x-auto pb-2 scrollbar-hide">
-                    {dates.map((date, i) => (
+                    {dates.map((date, i) => {
+                      const isClosed = weeklyHours ? !isSalonOpenOnDate(weeklyHours, date) : false;
+                      const isSelected = isSameDay(selectedDate, date);
+                      return (
                       <button
                         key={i}
-                        onClick={() => setSelectedDate(date)}
+                        type="button"
+                        disabled={isClosed}
+                        onClick={() => !isClosed && setSelectedDate(date)}
                         className={`flex-shrink-0 w-14 md:w-16 py-3 md:py-4 rounded-2xl border-2 flex flex-col items-center transition-all ${
-                          selectedDate.getTime() === date.getTime()
+                          isClosed
+                            ? 'bg-stone-100 text-stone-400 border-stone-200 cursor-not-allowed opacity-60'
+                            : isSelected
                             ? 'bg-stone-900 text-white border-stone-900 shadow-md'
                             : 'bg-white text-stone-600 border-stone-200 hover:border-stone-300'
                         }`}
                       >
                         <span className="text-[10px] uppercase font-semibold opacity-80 mb-1">{format(date, 'EEE')}</span>
                         <span className="text-lg md:text-xl font-bold">{format(date, 'd')}</span>
+                        {isClosed && <span className="text-[9px] mt-0.5 font-semibold uppercase">Closed</span>}
                       </button>
-                    ))}
+                    );})}
                   </div>
                 </div>
 
@@ -398,8 +423,8 @@ export default function SalonDetails() {
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stone-900"></div>
                     </div>
                   ) : filteredTimeSlots.length === 0 ? (
-                    <div className="text-center py-8 text-stone-500 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm">
-                      No available slots for this date
+                    <div className="text-center py-8 text-stone-500 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm px-4">
+                      {slotsReason ?? 'No available slots for this date'}
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-2 md:gap-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">

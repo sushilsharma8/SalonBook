@@ -35,3 +35,52 @@ h1, h2, h3, h4, h5, h6 {
   background-color: #d6d3d1;
   border-radius: 999px;
 }
+
+/* Instant press feedback on all native buttons */
+@layer base {
+  button:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="button"]:not(:disabled) {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition:
+      transform 150ms ease-out,
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease,
+      opacity 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  button:not(:disabled):active,
+  input[type="submit"]:not(:disabled):active,
+  input[type="button"]:not(:disabled):active {
+    transform: scale(0.97);
+  }
+
+  button:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
+
+/* Link-styled CTAs (Sign Up, etc.) */
+.btn-interactive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    transform 150ms ease-out,
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.btn-interactive:active {
+  transform: scale(0.97);
+}

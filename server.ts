@@ -77,6 +77,208 @@ function normalizeUserGender(value: unknown): UserGender | null {
   return null;
 }
 
+/** Hidden staff row used when a salon has no manually added team members. */
+const SALON_DEFAULT_STAFF_SKILLS = '__SALON_DEFAULT__';
+
+async function ensureSalonDefaultStaff(prismaClient: PrismaClient, salonId: string) {
+  const salon = await prismaClient.salon.findUnique({
+    where: { id: salonId },
+    include: { services: { select: { id: true } } },
+  });
+  if (!salon) throw new Error('Salon not found');
+
+  let staff = await prismaClient.staff.findFirst({
+    where: { salonId, skills: SALON_DEFAULT_STAFF_SKILLS },
+  });
+
+  if (!staff) {
+    staff = await prismaClient.staff.create({
+      data: {
+        salonId,
+        name: 'Any stylist',
+        skills: SALON_DEFAULT_STAFF_SKILLS,
+        isActive: true,
+      },
+    });
+  } else if (!staff.isActive) {
+    staff = await prismaClient.staff.update({
+      where: { id: staff.id },
+      data: { isActive: true },
+    });
+  }
+
+  await syncStaffAvailabilityFromSalonHours(prismaClient, salonId, staff!.id);
+
+  if (salon.services.length > 0) {
+    await prismaClient.staffService.createMany({
+      data: salon.services.map((svc) => ({ staffId: staff!.id, serviceId: svc.id })),
+      skipDuplicates: true,
+    });
+  }
+
+  return staff;
+}
+
+async function deactivateSalonDefaultStaff(prismaClient: PrismaClient, salonId: string) {
+  await prismaClient.staff.updateMany({
+    where: { salonId, skills: SALON_DEFAULT_STAFF_SKILLS, isActive: true },
+    data: { isActive: false },
+  });
+}
+
+async function salonHasRealStaff(prismaClient: PrismaClient, salonId: string) {
+  const count = await prismaClient.staff.count({
+    where: {
+      salonId,
+      isActive: true,
+      NOT: { skills: SALON_DEFAULT_STAFF_SKILLS },
+    },
+  });
+  return count > 0;
+}
+
+type SalonDayHoursRow = {
+  dayOfWeek: number;
+  isOpen: boolean;
+  startTime: string;
+  endTime: string;
+};
+
+function buildDefaultWeeklyHours(openTime: string, closeTime: string): SalonDayHoursRow[] {
+  return [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+    dayOfWeek,
+    isOpen: true,
+    startTime: openTime,
+    endTime: closeTime,
+  }));
+}
+
+function parseWeeklyHoursInput(
+  raw: unknown,
+  openTime: string,
+  closeTime: string
+): SalonDayHoursRow[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return buildDefaultWeeklyHours(openTime, closeTime);
+  }
+
+  const byDay = new Map<number, SalonDayHoursRow>();
+  for (const entry of raw) {
+    const dayOfWeek = Number((entry as { dayOfWeek?: unknown }).dayOfWeek);
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) continue;
+    const isOpen = Boolean((entry as { isOpen?: unknown }).isOpen);
+    const startTime = String((entry as { startTime?: unknown }).startTime || openTime);
+    const endTime = String((entry as { endTime?: unknown }).endTime || closeTime);
+    byDay.set(dayOfWeek, { dayOfWeek, isOpen, startTime, endTime });
+  }
+
+  return [0, 1, 2, 3, 4, 5, 6].map(
+    (dayOfWeek) =>
+      byDay.get(dayOfWeek) ?? { dayOfWeek, isOpen: true, startTime: openTime, endTime: closeTime }
+  );
+}
+
+function validateWeeklyHours(hours: SalonDayHoursRow[]) {
+  const openDays = hours.filter((h) => h.isOpen);
+  if (openDays.length === 0) {
+    throw new Error('Salon must be open on at least one day of the week');
+  }
+  for (const day of openDays) {
+    const start = timeToMinutes(day.startTime);
+    const end = timeToMinutes(day.endTime);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+      throw new Error(`Invalid hours for day ${day.dayOfWeek}`);
+    }
+  }
+}
+
+async function getSalonWeeklyHours(prismaClient: PrismaClient, salonId: string): Promise<SalonDayHoursRow[]> {
+  const salon = await prismaClient.salon.findUnique({
+    where: { id: salonId },
+    select: { openTime: true, closeTime: true },
+  });
+  if (!salon) throw new Error('Salon not found');
+
+  const rows = await prismaClient.salonHours.findMany({
+    where: { salonId },
+    orderBy: { dayOfWeek: 'asc' },
+  });
+  if (rows.length === 0) {
+    return buildDefaultWeeklyHours(salon.openTime, salon.closeTime);
+  }
+  return rows.map((r) => ({
+    dayOfWeek: r.dayOfWeek,
+    isOpen: r.isOpen,
+    startTime: r.startTime,
+    endTime: r.endTime,
+  }));
+}
+
+async function saveSalonWeeklyHours(
+  prismaClient: PrismaClient,
+  salonId: string,
+  hours: SalonDayHoursRow[]
+) {
+  validateWeeklyHours(hours);
+  await prismaClient.$transaction(
+    hours.map((day) =>
+      prismaClient.salonHours.upsert({
+        where: { salonId_dayOfWeek: { salonId, dayOfWeek: day.dayOfWeek } },
+        create: {
+          salonId,
+          dayOfWeek: day.dayOfWeek,
+          isOpen: day.isOpen,
+          startTime: day.startTime,
+          endTime: day.endTime,
+        },
+        update: {
+          isOpen: day.isOpen,
+          startTime: day.startTime,
+          endTime: day.endTime,
+        },
+      })
+    )
+  );
+}
+
+async function syncStaffAvailabilityFromSalonHours(
+  prismaClient: PrismaClient,
+  salonId: string,
+  staffId?: string
+) {
+  const hours = await getSalonWeeklyHours(prismaClient, salonId);
+  const openHours = hours.filter((h) => h.isOpen);
+  const staffList = await prismaClient.staff.findMany({
+    where: {
+      salonId,
+      isActive: true,
+      ...(staffId ? { id: staffId } : {}),
+    },
+  });
+
+  for (const staff of staffList) {
+    await prismaClient.staffAvailability.deleteMany({ where: { staffId: staff.id } });
+    if (openHours.length > 0) {
+      await prismaClient.staffAvailability.createMany({
+        data: openHours.map((h) => ({
+          staffId: staff.id,
+          dayOfWeek: h.dayOfWeek,
+          startTime: h.startTime,
+          endTime: h.endTime,
+        })),
+      });
+    }
+  }
+}
+
+function getDayHoursFromWeekly(hours: SalonDayHoursRow[], day: number, legacyDay: number) {
+  return (
+    hours.find((h) => h.dayOfWeek === day && h.isOpen) ??
+    hours.find((h) => h.dayOfWeek === legacyDay && h.isOpen) ??
+    null
+  );
+}
+
 type ResolvedServiceVariant = {
   serviceId: string;
   serviceName: string;
@@ -146,11 +348,16 @@ async function getAvailableSlots(
     throw new Error('Salon not found');
   }
 
-  const staffList = await prisma.staff.findMany({
+  const salonWeeklyHours = await getSalonWeeklyHours(prisma, salonId);
+
+  const useRealStaffOnly = !staffId && (await salonHasRealStaff(prisma, salonId));
+
+  let staffList = await prisma.staff.findMany({
     where: {
       salonId,
       isActive: true,
       ...(staffId ? { id: staffId } : {}),
+      ...(useRealStaffOnly ? { NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } : {}),
       AND: serviceIds.map(id => ({
         services: { some: { serviceId: id } }
       }))
@@ -162,6 +369,25 @@ async function getAvailableSlots(
     },
   });
 
+  if (staffList.length === 0 && !staffId) {
+    await ensureSalonDefaultStaff(prisma, salonId);
+    staffList = await prisma.staff.findMany({
+      where: {
+        salonId,
+        isActive: true,
+        skills: SALON_DEFAULT_STAFF_SKILLS,
+        AND: serviceIds.map((id) => ({
+          services: { some: { serviceId: id } },
+        })),
+      },
+      include: {
+        availability: true,
+        timeOff: true,
+        bookings: true,
+      },
+    });
+  }
+
   // Parse date string "YYYY-MM-DD" safely as UTC
   const [year, month, d] = date.split('-').map(Number);
   const dateObj = new Date(Date.UTC(year, month - 1, d));
@@ -172,13 +398,21 @@ async function getAvailableSlots(
   for (const staff of staffList) {
     // Support both 0-6 (Sun-Sat) and 1-7 (Mon-Sun) encodings in existing DBs.
     const legacyDay = day === 0 ? 7 : day;
-    const availability =
+    const salonDayHours = getDayHoursFromWeekly(salonWeeklyHours, day, legacyDay);
+    if (!salonDayHours) continue;
+
+    const staffDayAvailability =
       staff.availability.find((a) => a.dayOfWeek === day) ??
-      staff.availability.find((a) => a.dayOfWeek === legacyDay) ??
-      // Back-compat fallback: if no availability rows exist at all, assume salon hours.
-      (staff.availability.length === 0
-        ? { dayOfWeek: day, startTime: salon.openTime, endTime: salon.closeTime }
-        : undefined);
+      staff.availability.find((a) => a.dayOfWeek === legacyDay);
+
+    const availability = staffDayAvailability
+      ? {
+          startTime: staffDayAvailability.startTime,
+          endTime: staffDayAvailability.endTime,
+        }
+      : staff.availability.length === 0
+        ? { startTime: salonDayHours.startTime, endTime: salonDayHours.endTime }
+        : undefined;
     if (!availability) continue;
 
     let start = timeToMinutes(availability.startTime);
@@ -251,10 +485,12 @@ async function createBooking(prisma: PrismaClient, data: any) {
     const resolveStaffId = async () => {
       if (staffIdToUse) return staffIdToUse;
 
+      const hasRealStaff = await salonHasRealStaff(tx as unknown as PrismaClient, salonId);
       const candidates = await tx.staff.findMany({
         where: {
           salonId,
           isActive: true,
+          ...(hasRealStaff ? { NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } : {}),
           AND: serviceIds.map((id) => ({
             services: { some: { serviceId: id } },
           })),
@@ -262,8 +498,11 @@ async function createBooking(prisma: PrismaClient, data: any) {
         include: { availability: true },
       });
 
+      const legacyDay = day === 0 ? 7 : day;
       for (const candidate of candidates) {
-        const availability = candidate.availability.find((a) => a.dayOfWeek === day);
+        const availability =
+          candidate.availability.find((a) => a.dayOfWeek === day) ??
+          candidate.availability.find((a) => a.dayOfWeek === legacyDay);
         if (!availability) continue;
 
         const availStart = timeToMinutes(availability.startTime);
@@ -286,7 +525,37 @@ async function createBooking(prisma: PrismaClient, data: any) {
         if (!conflict) return candidate.id;
       }
 
-      throw new Error("No available professional for the selected slot");
+      const defaultStaff = await ensureSalonDefaultStaff(tx as unknown as PrismaClient, salonId);
+      const defaultAvailability = await tx.staffAvailability.findMany({
+        where: { staffId: defaultStaff.id },
+      });
+      const availability =
+        defaultAvailability.find((a) => a.dayOfWeek === day) ??
+        defaultAvailability.find((a) => a.dayOfWeek === legacyDay);
+      if (availability) {
+        const availStart = timeToMinutes(availability.startTime);
+        const availEnd = timeToMinutes(availability.endTime);
+        if (startMinutes < availStart || endMinutes > availEnd) {
+          throw new Error('Selected time is outside salon hours');
+        }
+      }
+
+      const defaultConflict = await tx.booking.findFirst({
+        where: {
+          staffId: defaultStaff.id,
+          startTime: { lt: endTime },
+          endTime: { gt: startDate },
+          OR: [
+            { status: 'CONFIRMED' },
+            { status: 'PENDING', createdAt: { gt: fifteenMinsAgo } },
+          ],
+        },
+      });
+      if (defaultConflict) {
+        throw new Error('Slot already booked');
+      }
+
+      return defaultStaff.id;
     };
 
     const resolvedStaffId = await resolveStaffId();
@@ -542,9 +811,10 @@ export async function createApp() {
       const salon = await prisma.salon.findUnique({
         where: { id: req.params.id },
         include: { 
-          services: { include: { variants: true } }, 
+          services: { include: { variants: true } },
+          hours: { orderBy: { dayOfWeek: 'asc' } },
           staff: {
-            where: { isActive: true },
+            where: { isActive: true, NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } },
             include: { services: true }
           }, 
           reviews: {
@@ -572,7 +842,8 @@ export async function createApp() {
         where: { ownerId: req.user.userId },
         include: {
           services: { include: { variants: true } },
-          staff: { where: { isActive: true } }
+          hours: { orderBy: { dayOfWeek: 'asc' } },
+          staff: { where: { isActive: true, NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } }
         }
       });
       res.json(salon || null);
@@ -584,9 +855,12 @@ export async function createApp() {
   // Seller: Create/Update Salon
   app.post('/api/seller/salon', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
-    const { name, address, categories, images, openTime, closeTime } = req.body;
+    const { name, address, categories, images, openTime, closeTime, weeklyHours } = req.body;
     
     try {
+      const hoursPayload = parseWeeklyHoursInput(weeklyHours, openTime, closeTime);
+      validateWeeklyHours(hoursPayload);
+
       let salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (salon) {
         salon = await prisma.salon.update({
@@ -598,7 +872,18 @@ export async function createApp() {
           data: { name, address, categories, images, openTime, closeTime, ownerId: req.user.userId }
         });
       }
-      res.json(salon);
+
+      await saveSalonWeeklyHours(prisma, salon.id, hoursPayload);
+      await syncStaffAvailabilityFromSalonHours(prisma, salon.id);
+      if (!(await salonHasRealStaff(prisma, salon.id))) {
+        await ensureSalonDefaultStaff(prisma, salon.id);
+      }
+
+      const salonWithHours = await prisma.salon.findUnique({
+        where: { id: salon.id },
+        include: { hours: { orderBy: { dayOfWeek: 'asc' } } },
+      });
+      res.json(salonWithHours);
     } catch (error) {
       res.status(500).json({ error: 'Failed to save salon' });
     }
@@ -762,16 +1047,7 @@ export async function createApp() {
         data: { name, skills, gender: normalizedGender, salonId: salon.id }
       });
 
-      // Auto-create default availability (Mon-Sat, matching salon hours)
-      const availabilityDays = [1, 2, 3, 4, 5, 6]; // Mon-Sat
-      await prisma.staffAvailability.createMany({
-        data: availabilityDays.map(day => ({
-          staffId: staff.id,
-          dayOfWeek: day,
-          startTime: salon.openTime,
-          endTime: salon.closeTime,
-        })),
-      });
+      await syncStaffAvailabilityFromSalonHours(prisma, salon.id, staff.id);
 
       // Auto-link staff to all existing salon services
       if (salon.services.length > 0) {
@@ -782,6 +1058,8 @@ export async function createApp() {
           })),
         });
       }
+
+      await deactivateSalonDefaultStaff(prisma, salon.id);
 
       res.json(staff);
     } catch (error) {
@@ -825,6 +1103,10 @@ export async function createApp() {
           data: { isActive: false },
         });
       });
+
+      if (!(await salonHasRealStaff(prisma, salon.id))) {
+        await ensureSalonDefaultStaff(prisma, salon.id);
+      }
 
       res.json({ success: true });
     } catch (error) {
@@ -1310,12 +1592,7 @@ export async function createApp() {
 
       const staff = await prisma.staff.create({ data: { name, skills, gender: normalizedGender, salonId: req.params.id } });
 
-      const availabilityDays = [1, 2, 3, 4, 5, 6];
-      await prisma.staffAvailability.createMany({
-        data: availabilityDays.map(day => ({
-          staffId: staff.id, dayOfWeek: day, startTime: salon.openTime, endTime: salon.closeTime,
-        })),
-      });
+      await syncStaffAvailabilityFromSalonHours(prisma, req.params.id, staff.id);
 
       if (salon.services.length > 0) {
         await prisma.staffService.createMany({

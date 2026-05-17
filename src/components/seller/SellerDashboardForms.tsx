@@ -1,4 +1,5 @@
 import { type ChangeEvent, type ComponentType, type FormEvent } from 'react';
+import { WEEKDAYS, type SalonDayHours } from '../../lib/salonHours';
 
 type Category = {
   id: string;
@@ -34,6 +35,7 @@ interface SellerSalonFormProps {
   categories: Category[];
   maxSalonImages: number;
   salonData: SalonData;
+  weeklyHours: SalonDayHours[];
   uploadedImages: string[];
   primaryCategory: string | null;
   relatedCategories: string[];
@@ -41,6 +43,8 @@ interface SellerSalonFormProps {
   salonError: string;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   onSalonDataChange: (field: keyof SalonData, value: string) => void;
+  onWeeklyHoursChange: (hours: SalonDayHours[]) => void;
+  onApplyDefaultHoursToOpenDays: () => void;
   onImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onRemoveImage: (index: number) => void;
   onPrimaryCategoryChange: (next: string | null) => void;
@@ -66,6 +70,7 @@ export function SellerSalonForm({
   categories,
   maxSalonImages,
   salonData,
+  weeklyHours,
   uploadedImages,
   primaryCategory,
   relatedCategories,
@@ -73,6 +78,8 @@ export function SellerSalonForm({
   salonError,
   onSubmit,
   onSalonDataChange,
+  onWeeklyHoursChange,
+  onApplyDefaultHoursToOpenDays,
   onImageUpload,
   onRemoveImage,
   onPrimaryCategoryChange,
@@ -100,6 +107,96 @@ export function SellerSalonForm({
             <label className="block text-sm font-medium text-stone-700 mb-2">Closing Time</label>
             <input type="time" required className="w-full px-5 py-3.5 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 outline-none bg-stone-50/50" value={salonData.closeTime} onChange={(e) => onSalonDataChange('closeTime', e.target.value)} />
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-stone-50/50 p-5 md:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-stone-900 font-display">Weekly schedule</h3>
+              <p className="text-sm text-stone-500 mt-1">Choose which days your salon is open and set hours for each day.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onApplyDefaultHoursToOpenDays}
+              className="text-sm font-semibold text-stone-700 bg-white border border-stone-200 px-4 py-2 rounded-xl hover:bg-stone-100 transition-colors shrink-0"
+            >
+              Apply default hours to open days
+            </button>
+          </div>
+          <div className="space-y-2">
+            {WEEKDAYS.map(({ dayOfWeek, label }) => {
+              const day = weeklyHours.find((h) => h.dayOfWeek === dayOfWeek)!;
+              return (
+                <div
+                  key={dayOfWeek}
+                  className={`grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-3 sm:gap-4 items-center p-3 rounded-xl border ${
+                    day.isOpen ? 'bg-white border-stone-200' : 'bg-stone-100/80 border-stone-200/60'
+                  }`}
+                >
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={day.isOpen}
+                      onChange={(e) => {
+                        const isOpen = e.target.checked;
+                        onWeeklyHoursChange(
+                          weeklyHours.map((h) =>
+                            h.dayOfWeek === dayOfWeek
+                              ? {
+                                  ...h,
+                                  isOpen,
+                                  startTime: isOpen ? salonData.openTime : h.startTime,
+                                  endTime: isOpen ? salonData.closeTime : h.endTime,
+                                }
+                              : h
+                          )
+                        );
+                      }}
+                      className="w-4 h-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                    />
+                    <span className="font-semibold text-stone-900 w-28">{label}</span>
+                    {!day.isOpen && <span className="text-xs font-medium text-stone-500 uppercase tracking-wide">Closed</span>}
+                  </label>
+                  {day.isOpen ? (
+                    <div className="flex items-center gap-2 sm:justify-end">
+                      <input
+                        type="time"
+                        required
+                        value={day.startTime}
+                        onChange={(e) =>
+                          onWeeklyHoursChange(
+                            weeklyHours.map((h) =>
+                              h.dayOfWeek === dayOfWeek ? { ...h, startTime: e.target.value } : h
+                            )
+                          )
+                        }
+                        className="flex-1 sm:flex-none sm:w-36 px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                      />
+                      <span className="text-stone-400 text-sm">to</span>
+                      <input
+                        type="time"
+                        required
+                        value={day.endTime}
+                        onChange={(e) =>
+                          onWeeklyHoursChange(
+                            weeklyHours.map((h) =>
+                              h.dayOfWeek === dayOfWeek ? { ...h, endTime: e.target.value } : h
+                            )
+                          )
+                        }
+                        className="flex-1 sm:flex-none sm:w-36 px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-sm focus:ring-2 focus:ring-stone-900 outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-sm text-stone-400 sm:text-right">Not accepting bookings</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-stone-700 mb-2">Upload Salon Photos</label>
             <input

@@ -2,16 +2,20 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { ShieldCheck, Sparkles, Scissors } from 'lucide-react';
+import { Button } from '../components/ui/Button';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
+    setError('');
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -25,6 +29,8 @@ export default function Login() {
       navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -70,9 +76,9 @@ export default function Login() {
               onChange={e => setPassword(e.target.value)} 
             />
           </div>
-          <button type="submit" className="w-full bg-stone-900 text-white py-4 rounded-xl font-medium hover:bg-stone-800 transition-colors shadow-sm mt-4">
-            Sign In
-          </button>
+          <Button type="submit" variant="primary" size="lg" fullWidth loading={loading} className="mt-4">
+            {loading ? 'Signing in…' : 'Sign In'}
+          </Button>
         </form>
         <p className="mt-8 text-center text-stone-500">
           Don't have an account? <Link to="/register" className="text-stone-900 font-semibold hover:underline">Sign up</Link>

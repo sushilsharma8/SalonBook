@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { format } from 'date-fns';
+import { buildDefaultWeeklyHours, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
 import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell } from 'lucide-react';
 
 const CATEGORIES = [
@@ -53,6 +54,7 @@ export default function SellerDashboard() {
   const [showStaffForm, setShowStaffForm] = useState(false);
   
   const [salonData, setSalonData] = useState({ name: '', address: '', openTime: '09:00', closeTime: '18:00' });
+  const [weeklyHours, setWeeklyHours] = useState<SalonDayHours[]>(() => buildDefaultWeeklyHours('09:00', '18:00'));
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [primaryCategory, setPrimaryCategory] = useState<string | null>(null);
   const [relatedCategories, setRelatedCategories] = useState<string[]>([]);
@@ -91,6 +93,9 @@ export default function SellerDashboard() {
           openTime: fullSalon.openTime,
           closeTime: fullSalon.closeTime,
         });
+        setWeeklyHours(
+          normalizeWeeklyHoursFromApi(fullSalon.hours, fullSalon.openTime, fullSalon.closeTime)
+        );
         setUploadedImages(parsedImages.filter((img: string) => typeof img === 'string'));
         if (fullSalon.categories) {
           try {
@@ -126,6 +131,7 @@ export default function SellerDashboard() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           ...salonData,
+          weeklyHours,
           images: JSON.stringify(uploadedImages),
           categories: JSON.stringify({ primary: primaryCategory, related: relatedCategories })
         })
@@ -334,6 +340,16 @@ export default function SellerDashboard() {
     setSalonData((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleApplyDefaultHoursToOpenDays = () => {
+    setWeeklyHours((prev) =>
+      prev.map((day) =>
+        day.isOpen
+          ? { ...day, startTime: salonData.openTime, endTime: salonData.closeTime }
+          : day
+      )
+    );
+  };
+
   const handleRemoveUploadedImage = (index: number) => {
     setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
@@ -415,6 +431,9 @@ export default function SellerDashboard() {
             categories={CATEGORIES}
             maxSalonImages={MAX_SALON_IMAGES}
             salonData={salonData}
+            weeklyHours={weeklyHours}
+            onWeeklyHoursChange={setWeeklyHours}
+            onApplyDefaultHoursToOpenDays={handleApplyDefaultHoursToOpenDays}
             uploadedImages={uploadedImages}
             primaryCategory={primaryCategory}
             relatedCategories={relatedCategories}
@@ -487,7 +506,7 @@ export default function SellerDashboard() {
             {/* Staff */}
             <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-stone-200/60">
               <div className="flex justify-between items-center mb-8">
-                <h2 className="text-2xl font-bold text-stone-900 flex items-center font-display tracking-tight"><Users className="w-6 h-6 mr-3 text-stone-900" /> Staff</h2>
+                <h2 className="text-2xl font-bold text-stone-900 flex items-center font-display tracking-tight"><Users className="w-6 h-6 mr-3 text-stone-900" /> Staff <span className="text-sm font-normal text-stone-500 ml-2">(optional)</span></h2>
                 <button onClick={() => setShowStaffForm(!showStaffForm)} className="text-stone-900 hover:bg-stone-100 p-2.5 rounded-full transition-colors border border-stone-200"><Plus className="w-5 h-5" /></button>
               </div>
               
@@ -518,7 +537,11 @@ export default function SellerDashboard() {
                     </button>
                   </div>
                 ))}
-                {(!salon.staff || salon.staff.length === 0) && <p className="text-stone-500 text-center py-8 bg-stone-50 rounded-2xl border border-dashed border-stone-200">No staff added yet.</p>}
+                {(!salon.staff || salon.staff.length === 0) && (
+                  <p className="text-stone-500 text-center py-8 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm px-4">
+                    No staff added yet. Customers can still book using your salon hours.
+                  </p>
+                )}
               </div>
             </div>
           </div>
