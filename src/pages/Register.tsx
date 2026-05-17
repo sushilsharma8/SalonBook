@@ -61,7 +61,7 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error);
       
       login(data.user, data.token);
-      navigate(`/dashboard/${data.user.role.toLowerCase()}`);
+      navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
     } catch (err: any) {
       setError(err.message);
     }
