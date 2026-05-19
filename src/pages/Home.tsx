@@ -10,8 +10,9 @@ interface Salon {
   categories: string | null;
   openTime: string;
   closeTime: string;
-  services: any[];
-  reviews: any[];
+  serviceCount: number;
+  reviewCount: number;
+  avgRating: number | null;
 }
 
 const CATEGORIES = [
@@ -166,11 +167,11 @@ export default function Home() {
         </div>
         <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
           <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Total services</p>
-          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.reduce((acc, salon) => acc + salon.services.length, 0)}</p>
+          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.reduce((acc, salon) => acc + salon.serviceCount, 0)}</p>
         </div>
         <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
           <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Reviewed salons</p>
-          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.filter((s) => s.reviews.length > 0).length}</p>
+          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.filter((s) => s.reviewCount > 0).length}</p>
         </div>
       </div>
 
@@ -184,9 +185,7 @@ export default function Home() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {filteredSalons.map(salon => {
           const images = salon.images ? JSON.parse(salon.images) : ['https://picsum.photos/seed/salon/400/300'];
-          const avgRating = salon.reviews.length 
-            ? (salon.reviews.reduce((acc, r) => acc + r.rating, 0) / salon.reviews.length).toFixed(1)
-            : 'New';
+          const avgRating = salon.avgRating != null ? salon.avgRating.toFixed(1) : 'New';
 
           return (
             <Link 
@@ -230,7 +229,7 @@ export default function Home() {
                 
                 <div className="pt-5 border-t border-stone-100 flex justify-between items-center">
                   <span className="text-sm font-medium text-stone-600 bg-stone-100 px-4 py-1.5 rounded-full">
-                    {salon.services.length} services
+                    {salon.serviceCount} services
                   </span>
                   <span className="text-stone-900 font-semibold group-hover:translate-x-1 transition-transform flex items-center">
                     Book Now <ArrowRight className="w-4 h-4 ml-1" />

@@ -192,26 +192,65 @@ function validateWeeklyHours(hours: SalonDayHoursRow[]) {
   }
 }
 
-async function getSalonWeeklyHours(prismaClient: PrismaClient, salonId: string): Promise<SalonDayHoursRow[]> {
-  const salon = await prismaClient.salon.findUnique({
-    where: { id: salonId },
-    select: { openTime: true, closeTime: true },
-  });
-  if (!salon) throw new Error('Salon not found');
-
-  const rows = await prismaClient.salonHours.findMany({
-    where: { salonId },
-    orderBy: { dayOfWeek: 'asc' },
-  });
-  if (rows.length === 0) {
+function weeklyHoursFromSalonRecord(salon: {
+  openTime: string;
+  closeTime: string;
+  hours: Array<{ dayOfWeek: number; isOpen: boolean; startTime: string; endTime: string }>;
+}): SalonDayHoursRow[] {
+  if (salon.hours.length === 0) {
     return buildDefaultWeeklyHours(salon.openTime, salon.closeTime);
   }
-  return rows.map((r) => ({
+  return salon.hours.map((r) => ({
     dayOfWeek: r.dayOfWeek,
     isOpen: r.isOpen,
     startTime: r.startTime,
     endTime: r.endTime,
   }));
+}
+
+async function getSalonWeeklyHours(prismaClient: PrismaClient, salonId: string): Promise<SalonDayHoursRow[]> {
+  const salon = await prismaClient.salon.findUnique({
+    where: { id: salonId },
+    select: {
+      openTime: true,
+      closeTime: true,
+      hours: { orderBy: { dayOfWeek: 'asc' } },
+    },
+  });
+  if (!salon) throw new Error('Salon not found');
+  return weeklyHoursFromSalonRecord(salon);
+}
+
+function dayUtcBounds(date: string) {
+  const [year, month, d] = date.split('-').map(Number);
+  const dayStart = new Date(Date.UTC(year, month - 1, d));
+  const dayEnd = new Date(Date.UTC(year, month - 1, d + 1));
+  return { dayStart, dayEnd, day: dayStart.getUTCDay() };
+}
+
+function activeBookingsWhereForDay(dayStart: Date, dayEnd: Date) {
+  const fifteenMinsAgo = new Date(Date.now() - 15 * 60000);
+  return {
+    startTime: { gte: dayStart, lt: dayEnd },
+    status: { not: 'CANCELLED' as const },
+    OR: [
+      { status: { not: 'PENDING' as const } },
+      { status: 'PENDING' as const, createdAt: { gte: fifteenMinsAgo } },
+    ],
+  };
+}
+
+function staffSlotInclude(dayStart: Date, dayEnd: Date) {
+  return {
+    availability: true,
+    timeOff: {
+      where: { date: { gte: dayStart, lt: dayEnd } },
+    },
+    bookings: {
+      where: activeBookingsWhereForDay(dayStart, dayEnd),
+      select: { startTime: true, endTime: true },
+    },
+  };
 }
 
 async function saveSalonWeeklyHours(
@@ -328,6 +367,31 @@ async function resolveServiceVariantsForUser(
 }
 
 // --- Slot Generator ---
+async function findStaffForSlots(
+  prisma: PrismaClient,
+  salonId: string,
+  serviceIds: string[],
+  dayStart: Date,
+  dayEnd: Date,
+  staffId?: string,
+  useRealStaffOnly?: boolean
+) {
+  const staffWhere = {
+    salonId,
+    isActive: true,
+    ...(staffId ? { id: staffId } : {}),
+    ...(useRealStaffOnly ? { NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } : {}),
+    AND: serviceIds.map((id) => ({
+      services: { some: { serviceId: id } },
+    })),
+  };
+
+  return prisma.staff.findMany({
+    where: staffWhere,
+    include: staffSlotInclude(dayStart, dayEnd),
+  });
+}
+
 async function getAvailableSlots(
   prisma: PrismaClient,
   salonId: string,
@@ -337,37 +401,38 @@ async function getAvailableSlots(
   staffId?: string
 ) {
   const serviceIds = serviceIdsStr.split(',');
-  const services = await resolveServiceVariantsForUser(prisma, serviceIds, userGender);
-  const duration = services.reduce((acc, s) => acc + s.duration, 0);
+  const { dayStart, dayEnd, day } = dayUtcBounds(date);
 
-  const salon = await prisma.salon.findUnique({
-    where: { id: salonId },
-    select: { openTime: true, closeTime: true },
-  });
-  if (!salon) {
+  const [services, salonRecord, hasRealStaff] = await Promise.all([
+    resolveServiceVariantsForUser(prisma, serviceIds, userGender),
+    prisma.salon.findUnique({
+      where: { id: salonId },
+      select: {
+        openTime: true,
+        closeTime: true,
+        hours: { orderBy: { dayOfWeek: 'asc' } },
+      },
+    }),
+    staffId ? Promise.resolve(false) : salonHasRealStaff(prisma, salonId),
+  ]);
+
+  if (!salonRecord) {
     throw new Error('Salon not found');
   }
 
-  const salonWeeklyHours = await getSalonWeeklyHours(prisma, salonId);
+  const duration = services.reduce((acc, s) => acc + s.duration, 0);
+  const salonWeeklyHours = weeklyHoursFromSalonRecord(salonRecord);
+  const useRealStaffOnly = !staffId && hasRealStaff;
 
-  const useRealStaffOnly = !staffId && (await salonHasRealStaff(prisma, salonId));
-
-  let staffList = await prisma.staff.findMany({
-    where: {
-      salonId,
-      isActive: true,
-      ...(staffId ? { id: staffId } : {}),
-      ...(useRealStaffOnly ? { NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } : {}),
-      AND: serviceIds.map(id => ({
-        services: { some: { serviceId: id } }
-      }))
-    },
-    include: {
-      availability: true,
-      timeOff: true,
-      bookings: true,
-    },
-  });
+  let staffList = await findStaffForSlots(
+    prisma,
+    salonId,
+    serviceIds,
+    dayStart,
+    dayEnd,
+    staffId,
+    useRealStaffOnly
+  );
 
   if (staffList.length === 0 && !staffId) {
     await ensureSalonDefaultStaff(prisma, salonId);
@@ -380,19 +445,10 @@ async function getAvailableSlots(
           services: { some: { serviceId: id } },
         })),
       },
-      include: {
-        availability: true,
-        timeOff: true,
-        bookings: true,
-      },
+      include: staffSlotInclude(dayStart, dayEnd),
     });
   }
 
-  // Parse date string "YYYY-MM-DD" safely as UTC
-  const [year, month, d] = date.split('-').map(Number);
-  const dateObj = new Date(Date.UTC(year, month - 1, d));
-  const day = dateObj.getUTCDay();
-  
   let slotMap = new Map<string, boolean>();
 
   for (const staff of staffList) {
@@ -419,37 +475,20 @@ async function getAvailableSlots(
     let end = timeToMinutes(availability.endTime);
     if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) continue;
 
-    const bookings = staff.bookings.filter(b => {
-      // Compare dates using UTC to avoid timezone issues
-      const bDate = new Date(b.startTime);
-      const bDateStr = `${bDate.getUTCFullYear()}-${String(bDate.getUTCMonth() + 1).padStart(2, '0')}-${String(bDate.getUTCDate()).padStart(2, '0')}`;
-      if (bDateStr !== date) return false;
-      
-      if (b.status === 'CANCELLED') return false;
-      if (b.status === 'PENDING') {
-        const ageInMinutes = (new Date().getTime() - new Date(b.createdAt).getTime()) / 60000;
-        if (ageInMinutes > 15) return false;
-      }
-      return true;
-    });
-
     while (start + duration <= end) {
-      let slotEnd = start + duration;
+      const slotEnd = start + duration;
 
-      let conflict = bookings.some(b => {
+      const conflict = staff.bookings.some((b) => {
         const bStart = new Date(b.startTime).getUTCHours() * 60 + new Date(b.startTime).getUTCMinutes();
         const bEnd = new Date(b.endTime).getUTCHours() * 60 + new Date(b.endTime).getUTCMinutes();
-
         return isOverlapping(start, slotEnd, bStart, bEnd);
       });
 
       const timeStr = minutesToTime(start);
       if (!conflict) {
         slotMap.set(timeStr, true);
-      } else {
-        if (!slotMap.has(timeStr)) {
-          slotMap.set(timeStr, false);
-        }
+      } else if (!slotMap.has(timeStr)) {
+        slotMap.set(timeStr, false);
       }
 
       start += 15; // step size
@@ -794,11 +833,48 @@ export async function createApp() {
   };
 
   // Salons
+  let salonsListCache: { data: unknown[]; expiresAt: number } | null = null;
+  const SALONS_LIST_TTL_MS = 30_000;
+  const invalidateSalonsListCache = () => {
+    salonsListCache = null;
+  };
+
   app.get('/api/salons', async (req: Request, res: Response) => {
     try {
-      const salons = await prisma.salon.findMany({
-        include: { services: { include: { variants: true } }, reviews: true }
+      if (salonsListCache && Date.now() < salonsListCache.expiresAt) {
+        return res.json(salonsListCache.data);
+      }
+
+      const rows = await prisma.salon.findMany({
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          images: true,
+          categories: true,
+          openTime: true,
+          closeTime: true,
+          _count: { select: { services: true, reviews: true } },
+          reviews: { select: { rating: true } },
+        },
+        orderBy: { createdAt: 'desc' },
       });
+
+      const salons = rows.map(({ reviews, _count, ...salon }) => {
+        const reviewCount = _count.reviews;
+        const avgRating =
+          reviewCount > 0
+            ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount).toFixed(1))
+            : null;
+        return {
+          ...salon,
+          serviceCount: _count.services,
+          reviewCount,
+          avgRating,
+        };
+      });
+
+      salonsListCache = { data: salons, expiresAt: Date.now() + SALONS_LIST_TTL_MS };
       res.json(salons);
     } catch (error) {
       console.error(error);
@@ -883,6 +959,7 @@ export async function createApp() {
         where: { id: salon.id },
         include: { hours: { orderBy: { dayOfWeek: 'asc' } } },
       });
+      invalidateSalonsListCache();
       res.json(salonWithHours);
     } catch (error) {
       res.status(500).json({ error: 'Failed to save salon' });
@@ -1019,6 +1096,7 @@ export async function createApp() {
         });
       }
 
+      invalidateSalonsListCache();
       res.json(service);
     } catch (error: any) {
       console.error('Failed to add service:', error);
@@ -1077,6 +1155,7 @@ export async function createApp() {
       await prisma.service.deleteMany({
         where: { id: req.params.id, salonId: salon.id }
       });
+      invalidateSalonsListCache();
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Failed to delete service' });
@@ -1175,25 +1254,25 @@ export async function createApp() {
 
   app.get('/api/bookings/my', requireAuth, async (req: Request, res: Response) => {
     try {
-      const bookings = await prisma.booking.findMany({
-        where: { userId: req.user.userId },
-        include: { 
-          salon: {
-            include: {
-              owner: { select: { name: true, phone: true } }
-            }
-          }, 
-          services: { include: { service: true } }, 
-          staff: true 
-        },
-        orderBy: { startTime: 'desc' }
-      });
-      
-      // Also fetch reviews by this user to know which bookings have been reviewed
-      const reviews = await prisma.review.findMany({
-        where: { userId: req.user.userId }
-      });
-      
+      const [bookings, reviews] = await Promise.all([
+        prisma.booking.findMany({
+          where: { userId: req.user.userId },
+          include: {
+            salon: {
+              include: {
+                owner: { select: { name: true, phone: true } },
+              },
+            },
+            services: { include: { service: true } },
+            staff: true,
+          },
+          orderBy: { startTime: 'desc' },
+        }),
+        prisma.review.findMany({
+          where: { userId: req.user.userId },
+        }),
+      ]);
+
       res.json({ bookings, reviews });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch bookings' });
@@ -1306,6 +1385,7 @@ export async function createApp() {
           comment
         }
       });
+      invalidateSalonsListCache();
       res.json(review);
     } catch (error) {
       res.status(500).json({ error: 'Failed to submit review' });
@@ -1522,6 +1602,7 @@ export async function createApp() {
         where: { id: req.params.id },
         data: { name, address, openTime, closeTime, images, categories }
       });
+      invalidateSalonsListCache();
       res.json(salon);
     } catch (error) {
       res.status(500).json({ error: 'Failed to update salon' });
@@ -1559,6 +1640,7 @@ export async function createApp() {
           skipDuplicates: true,
         });
       }
+      invalidateSalonsListCache();
       res.json(service);
     } catch (error) {
       console.error('Admin add service error:', error);
@@ -1571,6 +1653,7 @@ export async function createApp() {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
     try {
       await prisma.service.deleteMany({ where: { id: req.params.serviceId, salonId: req.params.salonId } });
+      invalidateSalonsListCache();
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Failed to delete service' });
