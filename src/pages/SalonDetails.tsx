@@ -168,11 +168,18 @@ export default function SalonDetails() {
     return slotTime > new Date();
   });
 
-  if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
-  if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
+  const weeklyHours = useMemo(() => {
+    if (!salon) return null;
+    return normalizeWeeklyHoursFromApi(salon.hours, salon.openTime, salon.closeTime);
+  }, [salon]);
 
-  const images = (() => {
-    if (!salon.images) return ['https://picsum.photos/seed/salon/800/400'];
+  const dates = useMemo(
+    () => Array.from({ length: 14 }).map((_, i) => addDays(startOfToday(), i)),
+    [],
+  );
+
+  const images = useMemo(() => {
+    if (!salon?.images) return ['https://picsum.photos/seed/salon/800/400'];
     try {
       const parsed = JSON.parse(salon.images);
       const usable = Array.isArray(parsed) ? parsed.filter((img) => typeof img === 'string' && img.trim().length > 0) : [];
@@ -180,14 +187,7 @@ export default function SalonDetails() {
     } catch {
       return ['https://picsum.photos/seed/salon/800/400'];
     }
-  })();
-  
-  const weeklyHours = useMemo(() => {
-    if (!salon) return null;
-    return normalizeWeeklyHoursFromApi(salon.hours, salon.openTime, salon.closeTime);
-  }, [salon]);
-
-  const dates = Array.from({ length: 14 }).map((_, i) => addDays(startOfToday(), i));
+  }, [salon?.images]);
 
   useEffect(() => {
     if (!weeklyHours) return;
@@ -195,7 +195,10 @@ export default function SalonDetails() {
       const nextOpen = dates.find((d) => isSalonOpenOnDate(weeklyHours, d));
       if (nextOpen) setSelectedDate(nextOpen);
     }
-  }, [weeklyHours, salon?.id]);
+  }, [weeklyHours, salon?.id, selectedDate, dates]);
+
+  if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
+  if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-24 lg:pb-8">
