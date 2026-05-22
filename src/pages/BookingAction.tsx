@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { CheckCircle, XCircle, Calendar, Clock, User, Scissors, Loader2, AlertTriangle } from 'lucide-react';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function BookingAction() {
   const { token } = useParams<{ token: string }>();
+  const { token: authToken } = useAuthStore();
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +14,11 @@ export default function BookingAction() {
   const [actionDone, setActionDone] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/bookings/action/${token}`)
+    if (!authToken || !token) return;
+
+    fetch(`/api/bookings/action/${token}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
       .then(async res => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to load');
@@ -20,15 +26,19 @@ export default function BookingAction() {
       })
       .then(data => { setBooking(data); setLoading(false); })
       .catch(err => { setError(err.message); setLoading(false); });
-  }, [token]);
+  }, [token, authToken]);
 
   const handleAction = async (action: 'CONFIRMED' | 'CANCELLED') => {
+    if (!authToken) return;
     setActionLoading(true);
     try {
       const res = await fetch(`/api/bookings/action/${token}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action })
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ action }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Action failed');
@@ -62,10 +72,13 @@ export default function BookingAction() {
   }
 
   if (error && !booking) {
+    const isForbidden = error.toLowerCase().includes('authorized') || error.toLowerCase().includes('salon owners');
     return (
       <div className="max-w-md mx-auto text-center py-16 space-y-4">
         <AlertTriangle className="w-12 h-12 text-red-400 mx-auto" />
-        <h2 className="text-2xl font-bold text-stone-900 font-display">Link Invalid</h2>
+        <h2 className="text-2xl font-bold text-stone-900 font-display">
+          {isForbidden ? 'Access Denied' : 'Link Invalid'}
+        </h2>
         <p className="text-stone-500">{error}</p>
         <Link to="/" className="inline-block mt-4 px-6 py-3 bg-stone-900 text-white rounded-xl font-bold hover:bg-stone-800 transition-colors">
           Go Home
@@ -78,7 +91,7 @@ export default function BookingAction() {
 
   const bookingDate = new Date(booking.startTime);
   const services = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'Service';
-  const isPending = booking.status === 'PENDING' || booking.status === 'CONFIRMED';
+  const isPending = booking.status === 'PENDING';
 
   return (
     <div className="max-w-lg mx-auto space-y-6">

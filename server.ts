@@ -656,7 +656,7 @@ async function createBooking(prisma: PrismaClient, data: any) {
         startTime: new Date(startTime),
         endTime,
         totalAmount,
-        status: 'CONFIRMED',
+        status: 'PENDING',
         paymentStatus: 'PENDING',
         actionToken,
         services: {
@@ -1714,26 +1714,44 @@ export async function createApp() {
     }
   });
 
-  // Booking quick-action (token-based, no login required)
-  app.get('/api/bookings/action/:token', async (req: Request, res: Response) => {
+  // Booking quick-action (token link + authenticated salon owner or admin)
+  const assertCanManageBookingAction = (
+    req: Request,
+    res: Response,
+    booking: { salon: { ownerId: string } }
+  ): boolean => {
+    if (req.user.role === 'ADMIN') return true;
+    if (req.user.role !== 'SELLER') {
+      res.status(403).json({ error: 'Only salon owners can manage booking requests' });
+      return false;
+    }
+    if (booking.salon.ownerId !== req.user.userId) {
+      res.status(403).json({ error: 'You are not authorized to manage this booking' });
+      return false;
+    }
+    return true;
+  };
+
+  app.get('/api/bookings/action/:token', requireAuth, async (req: Request, res: Response) => {
     try {
       const booking = await prisma.booking.findUnique({
         where: { actionToken: req.params.token },
         include: {
           user: { select: { name: true, phone: true } },
-          salon: { select: { name: true } },
+          salon: { select: { name: true, ownerId: true } },
           staff: { select: { name: true } },
-          services: { include: { service: { select: { name: true } } } }
-        }
+          services: { include: { service: { select: { name: true } } } },
+        },
       });
       if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
+      if (!assertCanManageBookingAction(req, res, booking)) return;
       res.json(booking);
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch booking' });
     }
   });
 
-  app.post('/api/bookings/action/:token', async (req: Request, res: Response) => {
+  app.post('/api/bookings/action/:token', requireAuth, async (req: Request, res: Response) => {
     const { action } = req.body;
     if (!['CONFIRMED', 'CANCELLED'].includes(action)) {
       return res.status(400).json({ error: 'Invalid action. Use CONFIRMED or CANCELLED.' });
@@ -1741,16 +1759,17 @@ export async function createApp() {
     try {
       const booking = await prisma.booking.findUnique({
         where: { actionToken: req.params.token },
-        include: { salon: true }
+        include: { salon: true },
       });
       if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
-      if (booking.status !== 'PENDING' && booking.status !== 'CONFIRMED') {
+      if (!assertCanManageBookingAction(req, res, booking)) return;
+      if (booking.status !== 'PENDING') {
         return res.status(400).json({ error: `Cannot change status from ${booking.status}` });
       }
 
       const updated = await prisma.booking.update({
         where: { id: booking.id },
-        data: { status: action }
+        data: { status: action },
       });
       res.json(updated);
     } catch (error) {

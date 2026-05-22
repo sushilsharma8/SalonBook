@@ -150,7 +150,7 @@ export default function SalonDetails() {
           `Customer: ${user?.name}\n` +
           `Services: ${selectedServices.map(s => s.name).join(', ')}\n` +
           `Date: ${format(selectedDate, 'MMM d, yyyy')} at ${selectedTime}\n\n` +
-          `Accept or reject here:\n${actionUrl}`;
+          `Sign in with your salon account to accept or reject:\n${actionUrl}`;
         window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(whatsappMsg)}`, '_blank');
       }
       

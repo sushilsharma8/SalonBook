@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { ShieldCheck, Sparkles, Scissors } from 'lucide-react';
 import { Button } from '../components/ui/Button';
@@ -11,6 +11,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const redirectTo = (location.state as { from?: string } | null)?.from;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +28,11 @@ export default function Login() {
       if (!res.ok) throw new Error(data.error);
       
       login(data.user, data.token);
-      navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
+      if (redirectTo) {
+        navigate(redirectTo);
+      } else {
+        navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {

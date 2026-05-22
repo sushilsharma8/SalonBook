@@ -4,7 +4,7 @@
  */
 
 import { Suspense, lazy, type ReactNode } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/useAuthStore';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -17,10 +17,25 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const BookingAction = lazy(() => import('./pages/BookingAction'));
 const AdminSalonManage = lazy(() => import('./pages/AdminSalonManage'));
 
-function ProtectedRoute({ children, role }: { children: ReactNode, role?: string }) {
+function ProtectedRoute({
+  children,
+  role,
+  roles,
+}: {
+  children: ReactNode;
+  role?: string;
+  roles?: string[];
+}) {
   const { user } = useAuthStore();
-  if (!user) return <Navigate to="/login" />;
-  if (role && user.role !== role) return <Navigate to="/" />;
+  const location = useLocation();
+  const allowed = roles ?? (role ? [role] : undefined);
+
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+  if (allowed && !allowed.includes(user.role)) {
+    return <Navigate to="/" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -38,7 +53,14 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/salon/:id" element={<SalonDetails />} />
-            <Route path="/booking/action/:token" element={<BookingAction />} />
+            <Route
+              path="/booking/action/:token"
+              element={
+                <ProtectedRoute roles={['SELLER', 'ADMIN']}>
+                  <BookingAction />
+                </ProtectedRoute>
+              }
+            />
             <Route 
               path="/dashboard/customer" 
               element={
