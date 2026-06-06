@@ -1,0 +1,813 @@
+openapi: 3.0.3
+info:
+  title: SalonBook API
+  description: REST API for the SalonBook salon booking platform. Use with web, Android, or any HTTP client.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://your-app.vercel.app
+    description: Production (replace with your deployed URL)
+
+tags:
+  - name: Auth
+  - name: Salons
+  - name: Bookings
+  - name: Reviews
+  - name: Profile
+  - name: Seller
+  - name: Admin
+  - name: Health
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    UserGender:
+      type: string
+      enum: [MALE, FEMALE, OTHER]
+
+    UserRole:
+      type: string
+      enum: [CUSTOMER, SELLER, ADMIN]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+        phone:
+          type: string
+          nullable: true
+        gender:
+          $ref: '#/components/schemas/UserGender'
+          nullable: true
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+      required: [token, user]
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password, phone]
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        phone:
+          type: string
+          description: 10-digit Indian mobile number starting with 6-9
+        role:
+          type: string
+          enum: [CUSTOMER, SELLER]
+          default: CUSTOMER
+        gender:
+          $ref: '#/components/schemas/UserGender'
+          description: Required when role is CUSTOMER
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    SalonListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+        images:
+          type: string
+          nullable: true
+          description: Comma-separated image URLs or paths
+        categories:
+          type: string
+          nullable: true
+        openTime:
+          type: string
+          example: "09:00"
+        closeTime:
+          type: string
+          example: "21:00"
+        serviceCount:
+          type: integer
+        reviewCount:
+          type: integer
+        avgRating:
+          type: number
+          nullable: true
+
+    ServiceVariant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        targetGender:
+          type: string
+          enum: [MALE, FEMALE, UNISEX]
+        price:
+          type: integer
+        duration:
+          type: integer
+          description: Duration in minutes
+
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        salonId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceVariant'
+
+    SalonHours:
+      type: object
+      properties:
+        id:
+          type: string
+        dayOfWeek:
+          type: integer
+          description: 0 = Sunday … 6 = Saturday
+        isOpen:
+          type: boolean
+        startTime:
+          type: string
+        endTime:
+          type: string
+
+    Staff:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        salonId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        gender:
+          $ref: '#/components/schemas/UserGender'
+          nullable: true
+        skills:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        salonId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        user:
+          type: object
+          properties:
+            name:
+              type: string
+
+    SalonDetail:
+      allOf:
+        - $ref: '#/components/schemas/SalonListItem'
+        - type: object
+          properties:
+            lat:
+              type: number
+              nullable: true
+            lng:
+              type: number
+              nullable: true
+            services:
+              type: array
+              items:
+                $ref: '#/components/schemas/Service'
+            hours:
+              type: array
+              items:
+                $ref: '#/components/schemas/SalonHours'
+            staff:
+              type: array
+              items:
+                $ref: '#/components/schemas/Staff'
+            reviews:
+              type: array
+              items:
+                $ref: '#/components/schemas/Review'
+            owner:
+              type: object
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                  nullable: true
+
+    TimeSlot:
+      type: object
+      properties:
+        time:
+          type: string
+          example: "10:30"
+          description: HH:mm in UTC
+        available:
+          type: boolean
+
+    SlotsResponse:
+      type: object
+      properties:
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSlot'
+        reason:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+
+    CreateBookingRequest:
+      type: object
+      required: [salonId, serviceIds, time]
+      properties:
+        salonId:
+          type: string
+          format: uuid
+        serviceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        staffId:
+          type: string
+          format: uuid
+          nullable: true
+        time:
+          type: string
+          format: date-time
+          description: ISO 8601 UTC, e.g. 2026-06-06T10:30:00.000Z
+
+    BookingStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, CANCELLED, COMPLETED, NO_SHOW]
+
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        salonId:
+          type: string
+          format: uuid
+        staffId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        totalAmount:
+          type: integer
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        paymentStatus:
+          type: string
+        actionToken:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    MyBookingsResponse:
+      type: object
+      properties:
+        bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Booking'
+        reviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/Review'
+
+    UpdateBookingStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+
+    CreateReviewRequest:
+      type: object
+      required: [salonId, rating]
+      properties:
+        salonId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        gender:
+          $ref: '#/components/schemas/UserGender'
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Account deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/salons:
+    get:
+      tags: [Salons]
+      summary: List all salons
+      responses:
+        '200':
+          description: Salon list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SalonListItem'
+
+  /api/salons/{id}:
+    get:
+      tags: [Salons]
+      summary: Get salon details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Salon detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalonDetail'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/slots:
+    get:
+      tags: [Bookings]
+      summary: Get available time slots (CUSTOMER only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: salonId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: serviceIds
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated service UUIDs
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2026-06-06"
+        - name: staffId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Available slots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotsResponse'
+        '400':
+          description: Missing params or profile incomplete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not a customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bookings:
+    post:
+      tags: [Bookings]
+      summary: Create a booking (CUSTOMER only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '200':
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          description: Booking failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not a customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bookings/my:
+    get:
+      tags: [Bookings]
+      summary: Get current user's bookings and reviews
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Bookings and reviews
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyBookingsResponse'
+
+  /api/bookings/{id}/status:
+    put:
+      tags: [Bookings]
+      summary: Update booking status
+      description: Customers may only set status to CANCELLED.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBookingStatusRequest'
+      responses:
+        '200':
+          description: Status updated
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/reviews:
+    post:
+      tags: [Reviews]
+      summary: Submit a salon review (CUSTOMER only, requires completed visit)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '200':
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: Not eligible to review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/profile:
+    put:
+      tags: [Profile]
+      summary: Update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /api/seller/salon:
+    get:
+      tags: [Seller]
+      summary: Get seller's salon
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Salon or null
+    post:
+      tags: [Seller]
+      summary: Create or update seller salon
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Salon saved
+
+  /api/seller/upload-images:
+    post:
+      tags: [Seller]
+      summary: Upload salon images (multipart)
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: Uploaded URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urls:
+                    type: array
+                    items:
+                      type: string
+
+  /api/seller/services:
+    post:
+      tags: [Seller]
+      summary: Add a service
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Service created
+
+  /api/seller/staff:
+    post:
+      tags: [Seller]
+      summary: Add staff member
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Staff created
+
+  /api/seller/bookings:
+    get:
+      tags: [Seller]
+      summary: List salon bookings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Booking list
+
+  /api/admin/stats:
+    get:
+      tags: [Admin]
+      summary: Dashboard stats
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Stats
+
+  /api/admin/activity:
+    get:
+      tags: [Admin]
+      summary: Recent booking activity
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Activity feed
+
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      summary: List all users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User list
+
+  /api/admin/salons:
+    get:
+      tags: [Admin]
+      summary: List all salons
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Salon list

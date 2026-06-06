@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI } from '@google/genai';
 import ws from 'ws';
 
 dotenv.config();
@@ -33,8 +34,129 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'salon-images';
 const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER || 'salons';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MENU_MODEL = process.env.GEMINI_MENU_MODEL || 'gemini-3.5-flash';
 
 let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
+let geminiClient: GoogleGenAI | null = null;
+
+function getGeminiClient() {
+  if (!GEMINI_API_KEY) return null;
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  }
+  return geminiClient;
+}
+
+type NormalizedServiceVariant = {
+  targetGender: ServiceTargetGender;
+  price: number;
+  duration: number;
+};
+
+function normalizeAndValidateVariants(
+  variants: unknown,
+): { ok: true; variants: NormalizedServiceVariant[] } | { ok: false; error: string } {
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return { ok: false, error: 'At least one service variant is required' };
+  }
+
+  const normalizedVariants = variants.map((variant: any) => ({
+    targetGender: String(variant.targetGender || '').toUpperCase(),
+    price: Number(variant.price),
+    duration: Number(variant.duration),
+  }));
+
+  const seenGenders = new Set<string>();
+  for (const variant of normalizedVariants) {
+    if (!['MALE', 'FEMALE', 'UNISEX'].includes(variant.targetGender)) {
+      return { ok: false, error: 'Invalid variant gender. Use MALE, FEMALE, or UNISEX.' };
+    }
+    if (!Number.isFinite(variant.price) || variant.price <= 0 || !Number.isInteger(variant.price)) {
+      return { ok: false, error: 'Variant price must be a positive whole number.' };
+    }
+    if (!Number.isFinite(variant.duration) || variant.duration <= 0 || !Number.isInteger(variant.duration)) {
+      return { ok: false, error: 'Variant duration must be a positive whole number in minutes.' };
+    }
+    if (seenGenders.has(variant.targetGender)) {
+      return { ok: false, error: 'Duplicate variant gender for one service is not allowed.' };
+    }
+    seenGenders.add(variant.targetGender);
+  }
+
+  return {
+    ok: true,
+    variants: normalizedVariants.map((variant) => ({
+      targetGender: variant.targetGender as ServiceTargetGender,
+      price: variant.price,
+      duration: variant.duration,
+    })),
+  };
+}
+
+const MENU_EXTRACTION_PROMPT = `You are extracting salon service menu data from a rate-list or price menu photo.
+
+Rules:
+- Extract every distinct bookable service with its price(s).
+- Prices must be whole-number rupees (no decimals, no currency symbols in output).
+- If the menu shows one price for a service, use a single UNISEX variant.
+- Only create separate MALE and FEMALE variants when the menu explicitly lists different prices for men and women.
+- Estimate a reasonable service duration in minutes for each variant (typical salon services: haircut 30-45, color 60-90, facial 45-60, manicure 30-45, etc.).
+- Ignore headers, footers, salon branding, addresses, phone numbers, and non-service text.
+- Use clear, concise service names as they appear on the menu.
+- Return JSON only, matching the provided schema.`;
+
+const MENU_EXTRACTION_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    services: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          variants: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                targetGender: { type: 'STRING', enum: ['MALE', 'FEMALE', 'UNISEX'] },
+                price: { type: 'INTEGER' },
+                duration: { type: 'INTEGER' },
+              },
+              required: ['targetGender', 'price', 'duration'],
+            },
+          },
+        },
+        required: ['name', 'variants'],
+      },
+    },
+  },
+  required: ['services'],
+} as const;
+
+function sanitizeExtractedServices(raw: unknown): { name: string; variants: NormalizedServiceVariant[] }[] {
+  const services = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object' && Array.isArray((raw as { services?: unknown }).services)
+      ? (raw as { services: unknown[] }).services
+      : [];
+
+  const cleaned: { name: string; variants: NormalizedServiceVariant[] }[] = [];
+
+  for (const item of services) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as { name?: unknown }).name || '').trim();
+    if (!name) continue;
+
+    const validation = normalizeAndValidateVariants((item as { variants?: unknown }).variants);
+    if (!validation.ok) continue;
+
+    cleaned.push({ name, variants: validation.variants });
+  }
+
+  return cleaned;
+}
 function getSupabaseAdminClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null;
   if (!supabaseAdminClient) {
@@ -1032,6 +1154,88 @@ export async function createApp() {
     });
   });
 
+  app.post('/api/seller/services/extract-from-menu', requireAuth, (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({ error: 'AI extraction is not configured. Set GEMINI_API_KEY on the server.' });
+    }
+
+    salonImageUpload.single('image')(req, res, async (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Image must be 15MB or smaller' });
+        }
+        return res.status(400).json({ error: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ error: err.message || 'Upload failed' });
+      }
+
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file) {
+        return res.status(400).json({ error: 'No image uploaded' });
+      }
+
+      try {
+        const fileBuffer = await fs.promises.readFile(file.path);
+        const base64Data = fileBuffer.toString('base64');
+        const mimeType = file.mimetype || 'image/jpeg';
+
+        const response = await ai.models.generateContent({
+          model: GEMINI_MENU_MODEL,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { inlineData: { mimeType, data: base64Data } },
+                { text: MENU_EXTRACTION_PROMPT },
+              ],
+            },
+          ],
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: MENU_EXTRACTION_SCHEMA,
+          },
+        });
+
+        const rawText = response.text?.trim();
+        if (!rawText) {
+          return res.status(502).json({ error: 'AI returned an empty response. Try a clearer photo.' });
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          return res.status(502).json({ error: 'AI returned invalid JSON. Try again with a clearer photo.' });
+        }
+
+        const services = sanitizeExtractedServices(parsed);
+        if (services.length === 0) {
+          return res.status(422).json({
+            error: 'No services could be extracted from this image. Try a clearer photo of your rate list.',
+          });
+        }
+
+        return res.json({ services });
+      } catch (error: any) {
+        console.error('Menu extraction failed:', error);
+        const message = typeof error?.message === 'string' ? error.message : 'Failed to extract services from menu photo';
+        return res.status(500).json({ error: message });
+      } finally {
+        if (file.path) {
+          try {
+            await fs.promises.unlink(file.path);
+          } catch {
+            // Best-effort cleanup for temporary local upload files.
+          }
+        }
+      }
+    });
+  });
+
   // Seller: Manage Services
   app.post('/api/seller/services', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
@@ -1040,32 +1244,11 @@ export async function createApp() {
       const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
 
-      if (!Array.isArray(variants) || variants.length === 0) {
-        return res.status(400).json({ error: 'At least one service variant is required' });
+      const variantValidation = normalizeAndValidateVariants(variants);
+      if (variantValidation.ok === false) {
+        return res.status(400).json({ error: variantValidation.error });
       }
-
-      const normalizedVariants = variants.map((variant: any) => ({
-        targetGender: String(variant.targetGender || '').toUpperCase(),
-        price: Number(variant.price),
-        duration: Number(variant.duration),
-      }));
-
-      const seenGenders = new Set<string>();
-      for (const variant of normalizedVariants) {
-        if (!['MALE', 'FEMALE', 'UNISEX'].includes(variant.targetGender)) {
-          return res.status(400).json({ error: 'Invalid variant gender. Use MALE, FEMALE, or UNISEX.' });
-        }
-        if (!Number.isFinite(variant.price) || variant.price <= 0 || !Number.isInteger(variant.price)) {
-          return res.status(400).json({ error: 'Variant price must be a positive whole number.' });
-        }
-        if (!Number.isFinite(variant.duration) || variant.duration <= 0 || !Number.isInteger(variant.duration)) {
-          return res.status(400).json({ error: 'Variant duration must be a positive whole number in minutes.' });
-        }
-        if (seenGenders.has(variant.targetGender)) {
-          return res.status(400).json({ error: 'Duplicate variant gender for one service is not allowed.' });
-        }
-        seenGenders.add(variant.targetGender);
-      }
+      const normalizedVariants = variantValidation.variants;
 
       // Backward-compatible defaults for DBs where Service.price/duration are still NOT NULL.
       const baseVariant = normalizedVariants[0];
@@ -1078,7 +1261,7 @@ export async function createApp() {
           duration: baseVariant.duration,
           variants: {
             create: normalizedVariants.map((variant) => ({
-              targetGender: variant.targetGender as ServiceTargetGender,
+              targetGender: variant.targetGender,
               price: variant.price,
               duration: variant.duration,
             })),
@@ -1101,6 +1284,87 @@ export async function createApp() {
     } catch (error: any) {
       console.error('Failed to add service:', error);
       const message = typeof error?.message === 'string' ? error.message : 'Failed to add service';
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.post('/api/seller/services/bulk', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+
+    const { services } = req.body;
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({ error: 'At least one service is required' });
+    }
+
+    try {
+      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      const existingServices = await prisma.service.findMany({
+        where: { salonId: salon.id },
+        select: { name: true },
+      });
+      const existingNames = new Set(existingServices.map((svc) => svc.name.trim().toLowerCase()));
+
+      const salonStaff = await prisma.staff.findMany({ where: { salonId: salon.id }, select: { id: true } });
+      const created: any[] = [];
+      const skipped: string[] = [];
+
+      for (const item of services) {
+        const name = String(item?.name || '').trim();
+        if (!name) {
+          return res.status(400).json({ error: 'Each service must have a name' });
+        }
+
+        if (existingNames.has(name.toLowerCase())) {
+          skipped.push(name);
+          continue;
+        }
+
+        const variantValidation = normalizeAndValidateVariants(item?.variants);
+        if (variantValidation.ok === false) {
+          return res.status(400).json({ error: `${name}: ${variantValidation.error}` });
+        }
+
+        const normalizedVariants = variantValidation.variants;
+        const baseVariant = normalizedVariants[0];
+
+        const service = await prisma.service.create({
+          data: {
+            name,
+            salonId: salon.id,
+            price: baseVariant.price,
+            duration: baseVariant.duration,
+            variants: {
+              create: normalizedVariants.map((variant) => ({
+                targetGender: variant.targetGender,
+                price: variant.price,
+                duration: variant.duration,
+              })),
+            },
+          },
+          include: { variants: true },
+        });
+
+        if (salonStaff.length > 0) {
+          await prisma.staffService.createMany({
+            data: salonStaff.map((staff) => ({ staffId: staff.id, serviceId: service.id })),
+            skipDuplicates: true,
+          });
+        }
+
+        existingNames.add(name.toLowerCase());
+        created.push(service);
+      }
+
+      if (created.length > 0) {
+        invalidateSalonsListCache();
+      }
+
+      res.json({ created, skipped });
+    } catch (error: any) {
+      console.error('Failed to bulk import services:', error);
+      const message = typeof error?.message === 'string' ? error.message : 'Failed to import services';
       res.status(500).json({ error: message });
     }
   });

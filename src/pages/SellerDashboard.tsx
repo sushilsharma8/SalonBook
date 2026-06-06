@@ -1,8 +1,9 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { format } from 'date-fns';
 import { buildDefaultWeeklyHours, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
-import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell } from 'lucide-react';
+import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ScanLine } from 'lucide-react';
+import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
 
 const CATEGORIES = [
   { id: 'hair', label: 'Hair salon', icon: Scissors },
@@ -35,6 +36,9 @@ const SellerServiceForm = lazy(() =>
 );
 const SellerStaffForm = lazy(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerStaffForm })),
+);
+const SellerMenuImportReviewModal = lazy(() =>
+  import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
 );
 
 function FormFallback() {
@@ -69,6 +73,13 @@ export default function SellerDashboard() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [serviceError, setServiceError] = useState('');
   const [staffData, setStaffData] = useState({ name: '', skills: '', gender: 'OTHER' });
+  const [extractingMenu, setExtractingMenu] = useState(false);
+  const [showMenuImportModal, setShowMenuImportModal] = useState(false);
+  const [importedServices, setImportedServices] = useState<ImportedServiceDraft[]>([]);
+  const [importError, setImportError] = useState('');
+  const [importingBulk, setImportingBulk] = useState(false);
+  const [importNotice, setImportNotice] = useState('');
+  const menuImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchData();
@@ -366,6 +377,179 @@ export default function SellerDashboard() {
     });
   };
 
+  const normalizeImportedServicesForApi = (services: ImportedServiceDraft[]) => {
+    const cleaned = services
+      .map((service) => {
+        const name = service.name.trim();
+        const normalizedVariants = service.variants
+          .map((variant) => ({
+            ...variant,
+            price: String(variant.price).trim(),
+            duration: String(variant.duration).trim(),
+          }))
+          .filter((variant) => variant.price || variant.duration);
+
+        return { name, variants: normalizedVariants };
+      })
+      .filter((service) => service.name && service.variants.length > 0);
+
+    if (cleaned.length === 0) {
+      return { ok: false as const, error: 'Add at least one service with a name and one valid variant.' };
+    }
+
+    for (const service of cleaned) {
+      const hasIncompleteRow = service.variants.some((variant) => !variant.price || !variant.duration);
+      if (hasIncompleteRow) {
+        return { ok: false as const, error: `${service.name}: each variant must have both price and duration.` };
+      }
+
+      const hasInvalidNumbers = service.variants.some((variant) => {
+        const price = Number(variant.price);
+        const duration = Number(variant.duration);
+        return !Number.isInteger(price) || price <= 0 || !Number.isInteger(duration) || duration <= 0;
+      });
+      if (hasInvalidNumbers) {
+        return { ok: false as const, error: `${service.name}: price and duration must be positive whole numbers.` };
+      }
+    }
+
+    return {
+      ok: true as const,
+      services: cleaned.map((service) => ({
+        name: service.name,
+        variants: service.variants.map((variant) => ({
+          targetGender: variant.targetGender,
+          price: Number(variant.price),
+          duration: Number(variant.duration),
+        })),
+      })),
+    };
+  };
+
+  const handleMenuImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportError('');
+    setImportNotice('');
+    setExtractingMenu(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const res = await fetch('/api/seller/services/extract-from-menu', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setImportError(data?.error || `Failed to extract services (HTTP ${res.status})`);
+        return;
+      }
+
+      const extracted = Array.isArray(data?.services) ? data.services : [];
+      const drafts: ImportedServiceDraft[] = extracted.map((service: any) => ({
+        name: String(service?.name || '').trim(),
+        variants: Array.isArray(service?.variants)
+          ? service.variants.map((variant: any) => ({
+              targetGender: String(variant?.targetGender || 'UNISEX').toUpperCase(),
+              price: String(variant?.price ?? ''),
+              duration: String(variant?.duration ?? ''),
+            }))
+          : [],
+      })).filter((service: ImportedServiceDraft) => service.name && service.variants.length > 0);
+
+      if (drafts.length === 0) {
+        setImportError('No services could be extracted from this image.');
+        return;
+      }
+
+      setImportedServices(drafts);
+      setShowMenuImportModal(true);
+    } catch (err: any) {
+      setImportError(err?.message || 'Failed to analyze menu photo.');
+    } finally {
+      setExtractingMenu(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleMenuImportConfirm = async () => {
+    const normalized = normalizeImportedServicesForApi(importedServices);
+    if (!normalized.ok) {
+      setImportError(normalized.error);
+      return;
+    }
+
+    setImportError('');
+    setImportingBulk(true);
+
+    try {
+      const res = await fetch('/api/seller/services/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ services: normalized.services }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setImportError(data?.error || `Failed to import services (HTTP ${res.status})`);
+        return;
+      }
+
+      const createdCount = Array.isArray(data?.created) ? data.created.length : 0;
+      const skippedNames = Array.isArray(data?.skipped) ? data.skipped : [];
+
+      if (skippedNames.length > 0) {
+        setImportNotice(`Imported ${createdCount} service${createdCount === 1 ? '' : 's'}. Skipped duplicates: ${skippedNames.join(', ')}.`);
+      } else {
+        setImportNotice(`Imported ${createdCount} service${createdCount === 1 ? '' : 's'} successfully.`);
+      }
+
+      setShowMenuImportModal(false);
+      setImportedServices([]);
+      fetchData();
+    } catch (err: any) {
+      setImportError(err?.message || 'Failed to import services.');
+    } finally {
+      setImportingBulk(false);
+    }
+  };
+
+  const handleImportedServiceNameChange = (index: number, value: string) => {
+    setImportedServices((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], name: value };
+      return next;
+    });
+  };
+
+  const handleImportedVariantChange = (
+    serviceIndex: number,
+    variantIndex: number,
+    field: 'price' | 'duration',
+    value: string,
+  ) => {
+    setImportedServices((prev) => {
+      const next = [...prev];
+      const service = { ...next[serviceIndex] };
+      const variants = [...service.variants];
+      variants[variantIndex] = { ...variants[variantIndex], [field]: value };
+      next[serviceIndex] = { ...service, variants };
+      return next;
+    });
+  };
+
+  const handleRemoveImportedService = (index: number) => {
+    setImportedServices((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleStaffFieldChange = (field: keyof typeof staffData, value: string) => {
     setStaffData((prev) => ({ ...prev, [field]: value }));
   };
@@ -450,15 +634,67 @@ export default function SellerDashboard() {
         </Suspense>
       )}
 
+      {showMenuImportModal && (
+        <Suspense fallback={<FormFallback />}>
+          <SellerMenuImportReviewModal
+            services={importedServices}
+            importError={importError}
+            importing={importingBulk}
+            onClose={() => {
+              if (importingBulk) return;
+              setShowMenuImportModal(false);
+              setImportedServices([]);
+              setImportError('');
+            }}
+            onConfirm={handleMenuImportConfirm}
+            onServiceNameChange={handleImportedServiceNameChange}
+            onVariantChange={handleImportedVariantChange}
+            onRemoveService={handleRemoveImportedService}
+          />
+        </Suspense>
+      )}
+
       {salon && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column: Management */}
           <div className="lg:col-span-1 space-y-8">
             {/* Services */}
             <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-stone-200/60">
-              <div className="flex justify-between items-center mb-8">
+              <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold text-stone-900 flex items-center font-display tracking-tight"><Settings className="w-6 h-6 mr-3 text-stone-900" /> Services</h2>
                 <button onClick={() => setShowServiceForm(!showServiceForm)} className="text-stone-900 hover:bg-stone-100 p-2.5 rounded-full transition-colors border border-stone-200"><Plus className="w-5 h-5" /></button>
+              </div>
+              <div className="mb-8">
+                <input
+                  ref={menuImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleMenuImageSelect}
+                />
+                <button
+                  type="button"
+                  onClick={() => menuImageInputRef.current?.click()}
+                  disabled={extractingMenu}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed border-stone-300 bg-stone-50 text-stone-700 font-semibold hover:bg-stone-100 hover:border-stone-400 transition-colors disabled:opacity-60"
+                >
+                  <ScanLine className="w-4 h-4" />
+                  {extractingMenu ? 'Analyzing menu photo...' : 'Import from menu photo'}
+                </button>
+                <p className="mt-2 text-xs text-stone-500 text-center">
+                  Upload or take a photo of your rate list. AI will extract services for you to review.
+                </p>
+                {importError && !showMenuImportModal && (
+                  <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                    {importError}
+                  </div>
+                )}
+                {importNotice && (
+                  <div className="mt-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                    {importNotice}
+                  </div>
+                )}
               </div>
               
               {showServiceForm && (
