@@ -1,8 +1,18 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { format } from 'date-fns';
-import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle, ScanLine } from 'lucide-react';
+import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
+import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi } from '../lib/serviceImport';
+
+const SellerMenuImportReviewModal = lazy(() =>
+  import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
+);
+
+function FormFallback() {
+  return <div className="mb-6 rounded-xl border border-stone-200/60 bg-stone-50 p-4 text-sm text-stone-500">Loading...</div>;
+}
 
 const getStaffInitial = (name: string) => (name || 'S').trim().charAt(0).toUpperCase();
 
@@ -34,6 +44,12 @@ export default function AdminSalonManage() {
 
   const [showStaffForm, setShowStaffForm] = useState(false);
   const [staffForm, setStaffForm] = useState({ name: '', skills: '', gender: 'OTHER' });
+  const [extractingMenu, setExtractingMenu] = useState(false);
+  const [showMenuImportModal, setShowMenuImportModal] = useState(false);
+  const [importedServices, setImportedServices] = useState<ImportedServiceDraft[]>([]);
+  const [importError, setImportError] = useState('');
+  const [importingBulk, setImportingBulk] = useState(false);
+  const menuImageInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSalon = async () => {
     try {
@@ -99,6 +115,120 @@ export default function AdminSalonManage() {
       setServiceForm({ name: '', variants: [{ targetGender: 'MALE', price: '', duration: '' }, { targetGender: 'FEMALE', price: '', duration: '' }] });
       fetchSalon();
     } catch (err: any) { flash('error', err.message); }
+  };
+
+  const handleMenuImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+
+    setImportError('');
+    setExtractingMenu(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const res = await fetch(`/api/admin/salons/${id}/services/extract-from-menu`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setImportError(data?.error || `Failed to extract services (HTTP ${res.status})`);
+        return;
+      }
+
+      const drafts = mapExtractedServicesToDrafts(Array.isArray(data?.services) ? data.services : []);
+      if (drafts.length === 0) {
+        setImportError('No services could be extracted from this image.');
+        return;
+      }
+
+      setImportedServices(drafts);
+      setShowMenuImportModal(true);
+    } catch (err: any) {
+      setImportError(err?.message || 'Failed to analyze menu photo.');
+    } finally {
+      setExtractingMenu(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleMenuImportConfirm = async () => {
+    if (!id) return;
+
+    const normalized = normalizeImportedServicesForApi(importedServices);
+    if (!normalized.ok) {
+      setImportError(normalized.error);
+      return;
+    }
+
+    setImportError('');
+    setImportingBulk(true);
+
+    try {
+      const res = await fetch(`/api/admin/salons/${id}/services/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ services: normalized.services }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setImportError(data?.error || `Failed to import services (HTTP ${res.status})`);
+        return;
+      }
+
+      const createdCount = Array.isArray(data?.created) ? data.created.length : 0;
+      const skippedNames = Array.isArray(data?.skipped) ? data.skipped : [];
+
+      if (skippedNames.length > 0) {
+        flash('success', `Imported ${createdCount} service${createdCount === 1 ? '' : 's'}. Skipped duplicates: ${skippedNames.join(', ')}.`);
+      } else {
+        flash('success', `Imported ${createdCount} service${createdCount === 1 ? '' : 's'} successfully.`);
+      }
+
+      setShowMenuImportModal(false);
+      setImportedServices([]);
+      fetchSalon();
+    } catch (err: any) {
+      setImportError(err?.message || 'Failed to import services.');
+    } finally {
+      setImportingBulk(false);
+    }
+  };
+
+  const handleImportedServiceNameChange = (index: number, value: string) => {
+    setImportedServices((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], name: value };
+      return next;
+    });
+  };
+
+  const handleImportedVariantChange = (
+    serviceIndex: number,
+    variantIndex: number,
+    field: 'price' | 'duration',
+    value: string,
+  ) => {
+    setImportedServices((prev) => {
+      const next = [...prev];
+      const service = { ...next[serviceIndex] };
+      const variants = [...service.variants];
+      variants[variantIndex] = { ...variants[variantIndex], [field]: value };
+      next[serviceIndex] = { ...service, variants };
+      return next;
+    });
+  };
+
+  const handleRemoveImportedService = (index: number) => {
+    setImportedServices((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleDeleteService = async (serviceId: string) => {
@@ -168,6 +298,26 @@ export default function AdminSalonManage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      {showMenuImportModal && (
+        <Suspense fallback={<FormFallback />}>
+          <SellerMenuImportReviewModal
+            services={importedServices}
+            importError={importError}
+            importing={importingBulk}
+            onClose={() => {
+              if (importingBulk) return;
+              setShowMenuImportModal(false);
+              setImportedServices([]);
+              setImportError('');
+            }}
+            onConfirm={handleMenuImportConfirm}
+            onServiceNameChange={handleImportedServiceNameChange}
+            onVariantChange={handleImportedVariantChange}
+            onRemoveService={handleRemoveImportedService}
+          />
+        </Suspense>
+      )}
+
       {message && (
         <div className={`fixed top-20 right-4 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg border ${
           message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
@@ -233,9 +383,33 @@ export default function AdminSalonManage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Services */}
         <div className="bg-white p-5 md:p-8 rounded-2xl shadow-sm border border-stone-200/60">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-stone-900 font-display flex items-center"><Scissors className="w-5 h-5 mr-2" /> Services ({salon.services?.length || 0})</h2>
             <button onClick={() => setShowServiceForm(!showServiceForm)} className="p-2 text-stone-900 hover:bg-stone-100 rounded-full border border-stone-200"><Plus className="w-5 h-5" /></button>
+          </div>
+          <div className="mb-6">
+            <input
+              ref={menuImageInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleMenuImageSelect}
+            />
+            <button
+              type="button"
+              onClick={() => menuImageInputRef.current?.click()}
+              disabled={extractingMenu}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-stone-300 bg-stone-50 text-stone-700 font-semibold text-sm hover:bg-stone-100 hover:border-stone-400 transition-colors disabled:opacity-60"
+            >
+              <ScanLine className="w-4 h-4" />
+              {extractingMenu ? 'Analyzing menu photo...' : 'Import from menu photo'}
+            </button>
+            {importError && !showMenuImportModal && (
+              <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                {importError}
+              </div>
+            )}
           </div>
           {showServiceForm && (
             <form onSubmit={handleAddService} className="mb-6 space-y-3 bg-stone-50 p-4 rounded-xl border border-stone-200/60">

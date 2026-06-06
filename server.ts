@@ -157,6 +157,147 @@ function sanitizeExtractedServices(raw: unknown): { name: string; variants: Norm
 
   return cleaned;
 }
+
+async function extractServicesFromMenuFile(
+  file: Express.Multer.File,
+): Promise<
+  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices> }
+  | { ok: false; status: number; error: string }
+> {
+  const ai = getGeminiClient();
+  if (!ai) {
+    return { ok: false, status: 503, error: 'AI extraction is not configured. Set GEMINI_API_KEY on the server.' };
+  }
+
+  try {
+    const fileBuffer = await fs.promises.readFile(file.path);
+    const base64Data = fileBuffer.toString('base64');
+    const mimeType = file.mimetype || 'image/jpeg';
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_MENU_MODEL,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: MENU_EXTRACTION_PROMPT },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: MENU_EXTRACTION_SCHEMA,
+      },
+    });
+
+    const rawText = response.text?.trim();
+    if (!rawText) {
+      return { ok: false, status: 502, error: 'AI returned an empty response. Try a clearer photo.' };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return { ok: false, status: 502, error: 'AI returned invalid JSON. Try again with a clearer photo.' };
+    }
+
+    const services = sanitizeExtractedServices(parsed);
+    if (services.length === 0) {
+      return {
+        ok: false,
+        status: 422,
+        error: 'No services could be extracted from this image. Try a clearer photo of your rate list.',
+      };
+    }
+
+    return { ok: true, services };
+  } catch (error: any) {
+    console.error('Menu extraction failed:', error);
+    const message = typeof error?.message === 'string' ? error.message : 'Failed to extract services from menu photo';
+    return { ok: false, status: 500, error: message };
+  } finally {
+    if (file.path) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch {
+        // Best-effort cleanup for temporary local upload files.
+      }
+    }
+  }
+}
+
+async function bulkImportServicesForSalon(
+  salonId: string,
+  services: unknown,
+): Promise<
+  | { ok: true; created: any[]; skipped: string[] }
+  | { ok: false; status: number; error: string }
+> {
+  if (!Array.isArray(services) || services.length === 0) {
+    return { ok: false, status: 400, error: 'At least one service is required' };
+  }
+
+  const existingServices = await prisma.service.findMany({
+    where: { salonId },
+    select: { name: true },
+  });
+  const existingNames = new Set(existingServices.map((svc) => svc.name.trim().toLowerCase()));
+  const salonStaff = await prisma.staff.findMany({ where: { salonId }, select: { id: true } });
+  const created: any[] = [];
+  const skipped: string[] = [];
+
+  for (const item of services) {
+    const name = String((item as { name?: unknown })?.name || '').trim();
+    if (!name) {
+      return { ok: false, status: 400, error: 'Each service must have a name' };
+    }
+
+    if (existingNames.has(name.toLowerCase())) {
+      skipped.push(name);
+      continue;
+    }
+
+    const variantValidation = normalizeAndValidateVariants((item as { variants?: unknown })?.variants);
+    if (variantValidation.ok === false) {
+      return { ok: false, status: 400, error: `${name}: ${variantValidation.error}` };
+    }
+
+    const normalizedVariants = variantValidation.variants;
+    const baseVariant = normalizedVariants[0];
+
+    const service = await prisma.service.create({
+      data: {
+        name,
+        salonId,
+        price: baseVariant.price,
+        duration: baseVariant.duration,
+        variants: {
+          create: normalizedVariants.map((variant) => ({
+            targetGender: variant.targetGender,
+            price: variant.price,
+            duration: variant.duration,
+          })),
+        },
+      },
+      include: { variants: true },
+    });
+
+    if (salonStaff.length > 0) {
+      await prisma.staffService.createMany({
+        data: salonStaff.map((staff) => ({ staffId: staff.id, serviceId: service.id })),
+        skipDuplicates: true,
+      });
+    }
+
+    existingNames.add(name.toLowerCase());
+    created.push(service);
+  }
+
+  return { ok: true, created, skipped };
+}
+
 function getSupabaseAdminClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null;
   if (!supabaseAdminClient) {
@@ -1154,14 +1295,7 @@ export async function createApp() {
     });
   });
 
-  app.post('/api/seller/services/extract-from-menu', requireAuth, (req: Request, res: Response) => {
-    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(503).json({ error: 'AI extraction is not configured. Set GEMINI_API_KEY on the server.' });
-    }
-
+  const handleMenuImageUpload = (req: Request, res: Response, onFile: (file: Express.Multer.File) => Promise<void>) => {
     salonImageUpload.single('image')(req, res, async (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
@@ -1178,61 +1312,20 @@ export async function createApp() {
         return res.status(400).json({ error: 'No image uploaded' });
       }
 
-      try {
-        const fileBuffer = await fs.promises.readFile(file.path);
-        const base64Data = fileBuffer.toString('base64');
-        const mimeType = file.mimetype || 'image/jpeg';
+      await onFile(file);
+    });
+  };
 
-        const response = await ai.models.generateContent({
-          model: GEMINI_MENU_MODEL,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: MENU_EXTRACTION_PROMPT },
-              ],
-            },
-          ],
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: MENU_EXTRACTION_SCHEMA,
-          },
-        });
+  app.post('/api/seller/services/extract-from-menu', requireAuth, (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
 
-        const rawText = response.text?.trim();
-        if (!rawText) {
-          return res.status(502).json({ error: 'AI returned an empty response. Try a clearer photo.' });
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(rawText);
-        } catch {
-          return res.status(502).json({ error: 'AI returned invalid JSON. Try again with a clearer photo.' });
-        }
-
-        const services = sanitizeExtractedServices(parsed);
-        if (services.length === 0) {
-          return res.status(422).json({
-            error: 'No services could be extracted from this image. Try a clearer photo of your rate list.',
-          });
-        }
-
-        return res.json({ services });
-      } catch (error: any) {
-        console.error('Menu extraction failed:', error);
-        const message = typeof error?.message === 'string' ? error.message : 'Failed to extract services from menu photo';
-        return res.status(500).json({ error: message });
-      } finally {
-        if (file.path) {
-          try {
-            await fs.promises.unlink(file.path);
-          } catch {
-            // Best-effort cleanup for temporary local upload files.
-          }
-        }
+    handleMenuImageUpload(req, res, async (file) => {
+      const result = await extractServicesFromMenuFile(file);
+      if (result.ok === false) {
+        res.status(result.status).json({ error: result.error });
+        return;
       }
+      res.json({ services: result.services });
     });
   });
 
@@ -1291,77 +1384,20 @@ export async function createApp() {
   app.post('/api/seller/services/bulk', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
 
-    const { services } = req.body;
-    if (!Array.isArray(services) || services.length === 0) {
-      return res.status(400).json({ error: 'At least one service is required' });
-    }
-
     try {
       const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (!salon) return res.status(400).json({ error: 'Create salon first' });
 
-      const existingServices = await prisma.service.findMany({
-        where: { salonId: salon.id },
-        select: { name: true },
-      });
-      const existingNames = new Set(existingServices.map((svc) => svc.name.trim().toLowerCase()));
-
-      const salonStaff = await prisma.staff.findMany({ where: { salonId: salon.id }, select: { id: true } });
-      const created: any[] = [];
-      const skipped: string[] = [];
-
-      for (const item of services) {
-        const name = String(item?.name || '').trim();
-        if (!name) {
-          return res.status(400).json({ error: 'Each service must have a name' });
-        }
-
-        if (existingNames.has(name.toLowerCase())) {
-          skipped.push(name);
-          continue;
-        }
-
-        const variantValidation = normalizeAndValidateVariants(item?.variants);
-        if (variantValidation.ok === false) {
-          return res.status(400).json({ error: `${name}: ${variantValidation.error}` });
-        }
-
-        const normalizedVariants = variantValidation.variants;
-        const baseVariant = normalizedVariants[0];
-
-        const service = await prisma.service.create({
-          data: {
-            name,
-            salonId: salon.id,
-            price: baseVariant.price,
-            duration: baseVariant.duration,
-            variants: {
-              create: normalizedVariants.map((variant) => ({
-                targetGender: variant.targetGender,
-                price: variant.price,
-                duration: variant.duration,
-              })),
-            },
-          },
-          include: { variants: true },
-        });
-
-        if (salonStaff.length > 0) {
-          await prisma.staffService.createMany({
-            data: salonStaff.map((staff) => ({ staffId: staff.id, serviceId: service.id })),
-            skipDuplicates: true,
-          });
-        }
-
-        existingNames.add(name.toLowerCase());
-        created.push(service);
+      const result = await bulkImportServicesForSalon(salon.id, req.body.services);
+      if (result.ok === false) {
+        return res.status(result.status).json({ error: result.error });
       }
 
-      if (created.length > 0) {
+      if (result.created.length > 0) {
         invalidateSalonsListCache();
       }
 
-      res.json({ created, skipped });
+      res.json({ created: result.created, skipped: result.skipped });
     } catch (error: any) {
       console.error('Failed to bulk import services:', error);
       const message = typeof error?.message === 'string' ? error.message : 'Failed to import services';
@@ -1870,6 +1906,49 @@ export async function createApp() {
       res.json(salon);
     } catch (error) {
       res.status(500).json({ error: 'Failed to update salon' });
+    }
+  });
+
+  app.post('/api/admin/salons/:id/services/extract-from-menu', requireAuth, (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+
+    handleMenuImageUpload(req, res, async (file) => {
+      const salon = await prisma.salon.findUnique({ where: { id: req.params.id } });
+      if (!salon) {
+        res.status(404).json({ error: 'Salon not found' });
+        return;
+      }
+
+      const result = await extractServicesFromMenuFile(file);
+      if (result.ok === false) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({ services: result.services });
+    });
+  });
+
+  app.post('/api/admin/salons/:id/services/bulk', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+
+    try {
+      const salon = await prisma.salon.findUnique({ where: { id: req.params.id } });
+      if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+      const result = await bulkImportServicesForSalon(salon.id, req.body.services);
+      if (result.ok === false) {
+        return res.status(result.status).json({ error: result.error });
+      }
+
+      if (result.created.length > 0) {
+        invalidateSalonsListCache();
+      }
+
+      res.json({ created: result.created, skipped: result.skipped });
+    } catch (error: any) {
+      console.error('Admin bulk import services failed:', error);
+      const message = typeof error?.message === 'string' ? error.message : 'Failed to import services';
+      res.status(500).json({ error: message });
     }
   });
 

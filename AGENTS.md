@@ -33,5 +33,5 @@ See `package.json` scripts and `README.md` for the full list. Highlights:
 - **`npm run lint`** runs `tsc --noEmit` (TypeScript type-checking only, no ESLint).
 - The dev server uses Vite middleware mode (not a separate Vite dev server), so both API and frontend are served from `http://localhost:3000`.
 - `JWT_SECRET` has a hardcoded dev fallback (`'super-secret-key-for-dev'`), so the server starts fine without it set in `.env`.
-- `GEMINI_API_KEY` and `GOOGLE_MAPS_PLATFORM_KEY` are optional; the app degrades gracefully without them. When set, `GEMINI_API_KEY` also enables seller menu photo extraction (`POST /api/seller/services/extract-from-menu`) using `GEMINI_MENU_MODEL` (default `gemini-2.5-flash`).
+- `GEMINI_API_KEY` and `GOOGLE_MAPS_PLATFORM_KEY` are optional; the app degrades gracefully without them. When set, `GEMINI_API_KEY` also enables menu photo extraction for sellers (`POST /api/seller/services/extract-from-menu`) and admins (`POST /api/admin/salons/:id/services/extract-from-menu`) using `GEMINI_MENU_MODEL` (default `gemini-2.5-flash`).
 - There are no automated test suites in this project; validation is done via `npm run lint` (TypeScript check) and manual testing.
