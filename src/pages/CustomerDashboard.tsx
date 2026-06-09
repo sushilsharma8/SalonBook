@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { bookingTimeMs, formatBookingTime, isBookingUpcoming } from '../lib/bookingTime';
+import { bookingTimeMs, formatBookingTime, isBookingUpcoming, nowBookingTimeMs } from '../lib/bookingTime';
 import { buildGoogleMapsDirectionsUrl } from '../lib/maps';
 import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -345,7 +345,7 @@ export default function CustomerDashboard() {
           <div className="grid gap-4 md:gap-6">
             {displayedBookings.map(booking => {
               const isUpcoming = isBookingUpcoming(booking.startTime) && booking.status !== 'CANCELLED';
-              const canCancel = isUpcoming && (bookingTimeMs(booking.startTime) - bookingTimeMs(new Date()) > 2 * 60 * 60 * 1000);
+              const canCancel = isUpcoming && (bookingTimeMs(booking.startTime) - nowBookingTimeMs() > 2 * 60 * 60 * 1000);
               const isCompleted = booking.status === 'COMPLETED';
               const hasReviewed = reviews.some(r => r.salonId === booking.salonId);
 

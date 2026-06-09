@@ -1,9 +1,13 @@
 import { format } from 'date-fns';
 
 /**
- * Booking times are stored as ISO strings with wall-clock HH:mm in UTC fields
+ * SalonBook is operated in India: all salon hours, slots, and bookings use
+ * local wall-clock time (IST for users in India). Times are persisted as ISO
+ * strings with that wall-clock HH:mm copied into the UTC fields
  * (e.g. selecting 11:00 becomes "2025-06-10T11:00:00.000Z").
- * Always use these helpers instead of `new Date(...)` + local `format()`.
+ *
+ * Always use these helpers instead of `new Date(...)` + `format()` so display
+ * and comparisons stay on the same wall-clock calendar.
  */
 
 function toDate(value: string | Date): Date {
@@ -23,8 +27,21 @@ export function bookingTimeMs(value: string | Date): number {
   );
 }
 
+/** Current local wall-clock instant (matches how users pick slot times in India). */
+export function nowBookingTimeMs(): number {
+  const now = new Date();
+  return Date.UTC(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+    now.getMinutes(),
+    now.getSeconds(),
+  );
+}
+
 export function isBookingUpcoming(value: string | Date): boolean {
-  return bookingTimeMs(value) > bookingTimeMs(new Date());
+  return bookingTimeMs(value) > nowBookingTimeMs();
 }
 
 export function formatBookingTime(value: string | Date, pattern: string): string {
