@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard } from 'lucide-react';
 import { format, addDays, startOfToday, isSameDay } from 'date-fns';
+import { buildBookingIso } from '../lib/bookingTime';
 import { isSalonOpenOnDate, normalizeWeeklyHoursFromApi } from '../lib/salonHours';
 
 export default function SalonDetails() {
@@ -117,10 +118,7 @@ export default function SalonDetails() {
 
     setBookingLoading(true);
     try {
-      // Combine date and time in UTC format to avoid timezone issues
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const timeStr = `${selectedTime}:00.000Z`;
-      const bookingTimeStr = `${dateStr}T${timeStr}`;
+      const bookingTimeStr = buildBookingIso(selectedDate, selectedTime);
 
       // 1. Create Booking
       const res = await fetch('/api/bookings', {

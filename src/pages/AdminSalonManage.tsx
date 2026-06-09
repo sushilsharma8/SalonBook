@@ -1,10 +1,10 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { format } from 'date-fns';
+import { formatBookingTime } from '../lib/bookingTime';
 import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle, ScanLine } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
-import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi } from '../lib/serviceImport';
+import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
 
 const SellerMenuImportReviewModal = lazy(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
@@ -125,8 +125,9 @@ export default function AdminSalonManage() {
     setExtractingMenu(true);
 
     try {
+      const prepared = await prepareMenuImageForUpload(file);
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', prepared);
 
       const res = await fetch(`/api/admin/salons/${id}/services/extract-from-menu`, {
         method: 'POST',
@@ -136,7 +137,10 @@ export default function AdminSalonManage() {
 
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setImportError(data?.error || `Failed to extract services (HTTP ${res.status})`);
+        const fallback = res.status === 503
+          ? 'AI service is temporarily busy. Please wait a few seconds and try again.'
+          : `Failed to extract services (HTTP ${res.status})`;
+        setImportError(data?.error || fallback);
         return;
       }
 
@@ -279,12 +283,11 @@ export default function AdminSalonManage() {
         if (booking?.user?.phone) {
           const phone = booking.user.phone.replace(/\D/g, '');
           const phoneNum = phone.length === 10 ? '91' + phone : phone;
-          const bDate = new Date(booking.startTime);
           const svcNames = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'your appointment';
           const statusLabel = status === 'CONFIRMED' ? 'confirmed' : status === 'CANCELLED' ? 'cancelled' : 'completed';
           const msg = status === 'CANCELLED'
-            ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled by the admin. Please contact us for details.`
-            : `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting!'}`;
+            ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been cancelled by the admin. Please contact us for details.`
+            : `Hello ${booking.user.name}, your booking for ${svcNames} at ${salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting!'}`;
           window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
         }
 
@@ -493,9 +496,7 @@ export default function AdminSalonManage() {
           <p className="text-stone-500 text-center py-8 bg-stone-50 rounded-xl border border-dashed border-stone-200 text-sm">No bookings</p>
         ) : (
           <div className="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar">
-            {salon.bookings?.map((b: any) => {
-              const bDate = new Date(b.startTime);
-              return (
+            {salon.bookings?.map((b: any) => (
                 <div key={b.id} className="p-4 bg-stone-50 rounded-xl border border-stone-100 flex flex-col sm:flex-row justify-between gap-4">
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -509,7 +510,7 @@ export default function AdminSalonManage() {
                     </div>
                     <div className="text-xs text-stone-500 space-y-0.5">
                       <div className="flex items-center gap-1"><Users className="w-3 h-3" /> {b.user?.name} {b.user?.phone ? `(${b.user.phone})` : ''}</div>
-                      <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {format(bDate, 'MMM d, yyyy')} at {format(bDate, 'h:mm a')} · Staff: {b.staff?.name}</div>
+                      <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatBookingTime(b.startTime, 'MMM d, yyyy')} at {formatBookingTime(b.startTime, 'h:mm a')} · Staff: {b.staff?.name}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -525,8 +526,7 @@ export default function AdminSalonManage() {
                     )}
                   </div>
                 </div>
-              );
-            })}
+              ))}
           </div>
         )}
       </div>

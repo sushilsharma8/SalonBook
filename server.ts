@@ -35,7 +35,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'salon-images';
 const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER || 'salons';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MENU_MODEL = process.env.GEMINI_MENU_MODEL || 'gemini-3.5-flash';
+const GEMINI_MENU_MODEL = process.env.GEMINI_MENU_MODEL || 'gemini-2.5-flash';
 
 let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
 let geminiClient: GoogleGenAI | null = null;
@@ -158,6 +158,95 @@ function sanitizeExtractedServices(raw: unknown): { name: string; variants: Norm
   return cleaned;
 }
 
+const GEMINI_SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
+function normalizeMenuImageMimeType(mimeType: string, originalName?: string): string {
+  const normalized = (mimeType || '').toLowerCase().split(';')[0].trim();
+  if (GEMINI_SUPPORTED_IMAGE_TYPES.has(normalized)) {
+    return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
+  }
+
+  const ext = path.extname(originalName || '').toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+
+  return normalized || 'application/octet-stream';
+}
+
+function parseGeminiExtractionError(error: unknown): { status: number; error: string } {
+  const fallback = { status: 500, error: 'Failed to extract services from menu photo' };
+  if (!error || typeof error !== 'object') return fallback;
+
+  let message = typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string }).message
+    : fallback.error;
+
+  if (message.trim().startsWith('{')) {
+    try {
+      const nested = JSON.parse(message) as { error?: { code?: number | string; message?: string; status?: string } };
+      const apiError = nested.error;
+      if (apiError?.message) {
+        message = apiError.message;
+      }
+      const unavailable =
+        apiError?.status === 'UNAVAILABLE' ||
+        apiError?.code === 503 ||
+        apiError?.code === 'UNAVAILABLE';
+      if (unavailable) {
+        return {
+          status: 503,
+          error: 'AI service is temporarily busy. Please wait a few seconds and try again.',
+        };
+      }
+    } catch {
+      // Keep the original message when nested JSON parsing fails.
+    }
+  }
+
+  if (message.includes('Unsupported MIME type')) {
+    return {
+      status: 400,
+      error: 'Unsupported image format. Use JPG or PNG. On iPhone, set Camera → Formats → Most Compatible.',
+    };
+  }
+
+  if (/high demand|try again later|UNAVAILABLE/i.test(message)) {
+    return {
+      status: 503,
+      error: 'AI service is temporarily busy. Please wait a few seconds and try again.',
+    };
+  }
+
+  return { status: 500, error: message };
+}
+
+async function generateMenuExtraction(ai: GoogleGenAI, mimeType: string, base64Data: string) {
+  return ai.models.generateContent({
+    model: GEMINI_MENU_MODEL,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType, data: base64Data } },
+          { text: MENU_EXTRACTION_PROMPT },
+        ],
+      },
+    ],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: MENU_EXTRACTION_SCHEMA,
+    },
+  });
+}
+
 async function extractServicesFromMenuFile(
   file: Express.Multer.File,
 ): Promise<
@@ -172,24 +261,33 @@ async function extractServicesFromMenuFile(
   try {
     const fileBuffer = await fs.promises.readFile(file.path);
     const base64Data = fileBuffer.toString('base64');
-    const mimeType = file.mimetype || 'image/jpeg';
+    const mimeType = normalizeMenuImageMimeType(file.mimetype, file.originalname);
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MENU_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType, data: base64Data } },
-            { text: MENU_EXTRACTION_PROMPT },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: MENU_EXTRACTION_SCHEMA,
-      },
-    });
+    if (!GEMINI_SUPPORTED_IMAGE_TYPES.has(mimeType)) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Unsupported image format. Use JPG or PNG. On iPhone, set Camera → Formats → Most Compatible.',
+      };
+    }
+
+    let response;
+    try {
+      response = await generateMenuExtraction(ai, mimeType, base64Data);
+    } catch (firstError) {
+      const parsed = parseGeminiExtractionError(firstError);
+      if (parsed.status === 503) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        try {
+          response = await generateMenuExtraction(ai, mimeType, base64Data);
+        } catch (retryError) {
+          const retryParsed = parseGeminiExtractionError(retryError);
+          return { ok: false, status: retryParsed.status, error: retryParsed.error };
+        }
+      } else {
+        return { ok: false, status: parsed.status, error: parsed.error };
+      }
+    }
 
     const rawText = response.text?.trim();
     if (!rawText) {
@@ -215,8 +313,8 @@ async function extractServicesFromMenuFile(
     return { ok: true, services };
   } catch (error: any) {
     console.error('Menu extraction failed:', error);
-    const message = typeof error?.message === 'string' ? error.message : 'Failed to extract services from menu photo';
-    return { ok: false, status: 500, error: message };
+    const parsed = parseGeminiExtractionError(error);
+    return { ok: false, status: parsed.status, error: parsed.error };
   } finally {
     if (file.path) {
       try {
@@ -1312,7 +1410,15 @@ export async function createApp() {
         return res.status(400).json({ error: 'No image uploaded' });
       }
 
-      await onFile(file);
+      try {
+        await onFile(file);
+      } catch (error) {
+        console.error('Menu image upload handler failed:', error);
+        if (!res.headersSent) {
+          const parsed = parseGeminiExtractionError(error);
+          res.status(parsed.status).json({ error: parsed.error });
+        }
+      }
     });
   };
 

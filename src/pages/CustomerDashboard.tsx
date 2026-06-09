@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { format } from 'date-fns';
+import { bookingTimeMs, formatBookingTime, isBookingUpcoming } from '../lib/bookingTime';
 import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -89,7 +89,6 @@ export default function CustomerDashboard() {
         if (ownerPhoneRaw) {
           const phone = String(ownerPhoneRaw).replace(/\D/g, '');
           const phoneNum = phone.length === 10 ? '91' + phone : phone;
-          const bDate = booking?.startTime ? new Date(booking.startTime) : null;
           const services = Array.isArray(booking?.services)
             ? booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).filter(Boolean).join(', ')
             : '';
@@ -97,7 +96,7 @@ export default function CustomerDashboard() {
             `Hello ${booking?.salon?.owner?.name || 'there'}, the customer ${user?.name || ''} has cancelled their booking` +
             `${services ? ` for ${services}` : ''}` +
             `${booking?.salon?.name ? ` at ${booking.salon.name}` : ''}` +
-            `${bDate ? ` on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')}` : ''}.`;
+            `${booking?.startTime ? ` on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')}` : ''}.`;
           window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
         }
       }
@@ -169,11 +168,11 @@ export default function CustomerDashboard() {
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
 
-  const upcomingBookings = bookings.filter(b => new Date(b.startTime) > new Date() && b.status !== 'CANCELLED');
-  const pastBookings = bookings.filter(b => new Date(b.startTime) <= new Date() || b.status === 'CANCELLED');
+  const upcomingBookings = bookings.filter(b => isBookingUpcoming(b.startTime) && b.status !== 'CANCELLED');
+  const pastBookings = bookings.filter(b => !isBookingUpcoming(b.startTime) || b.status === 'CANCELLED');
   const nextUpcoming = upcomingBookings
     .slice()
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0];
+    .sort((a, b) => bookingTimeMs(a.startTime) - bookingTimeMs(b.startTime))[0];
   
   const displayedBookings = activeTab === 'upcoming' ? upcomingBookings : pastBookings;
 
@@ -202,7 +201,7 @@ export default function CustomerDashboard() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h3 className="text-xl md:text-2xl font-display font-bold">{nextUpcoming.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ')}</h3>
-              <p className="text-stone-300 mt-1 text-sm md:text-base">{nextUpcoming.salon.name} · {format(new Date(nextUpcoming.startTime), 'EEE, MMM d · h:mm a')}</p>
+              <p className="text-stone-300 mt-1 text-sm md:text-base">{nextUpcoming.salon.name} · {formatBookingTime(nextUpcoming.startTime, 'EEE, MMM d · h:mm a')}</p>
             </div>
             <Link
               to={`/salon/${nextUpcoming.salonId}`}
@@ -344,9 +343,8 @@ export default function CustomerDashboard() {
         ) : (
           <div className="grid gap-4 md:gap-6">
             {displayedBookings.map(booking => {
-              const bookingDate = new Date(booking.startTime);
-              const isUpcoming = bookingDate > new Date() && booking.status !== 'CANCELLED';
-              const canCancel = isUpcoming && (bookingDate.getTime() - new Date().getTime() > 2 * 60 * 60 * 1000); // > 2 hours
+              const isUpcoming = isBookingUpcoming(booking.startTime) && booking.status !== 'CANCELLED';
+              const canCancel = isUpcoming && (bookingTimeMs(booking.startTime) - bookingTimeMs(new Date()) > 2 * 60 * 60 * 1000);
               const isCompleted = booking.status === 'COMPLETED';
               const hasReviewed = reviews.some(r => r.salonId === booking.salonId);
 
@@ -376,12 +374,12 @@ export default function CustomerDashboard() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Calendar className="w-3.5 h-3.5 md:w-4 md:h-4 text-stone-400" />
-                        <span>{format(bookingDate, 'MMMM d, yyyy')}</span>
+                        <span>{formatBookingTime(booking.startTime, 'MMMM d, yyyy')}</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <Clock className="w-3.5 h-3.5 md:w-4 md:h-4 text-stone-400" />
                         <span>
-                          {format(bookingDate, 'h:mm a')} (with {toTitleCase(booking.staff?.name)})
+                          {formatBookingTime(booking.startTime, 'h:mm a')} (with {toTitleCase(booking.staff?.name)})
                         </span>
                       </div>
                     </div>
@@ -395,7 +393,7 @@ export default function CustomerDashboard() {
                     <div className="flex flex-wrap md:flex-col gap-2 justify-end">
                       {isUpcoming && booking.salon.owner?.phone && (
                         <a 
-                          href={`https://wa.me/${booking.salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + booking.salon.owner.phone.replace(/\D/g, '') : booking.salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${toTitleCase(booking.salon.owner.name)}, I have an upcoming appointment at ${toTitleCase(booking.salon.name)} for ${format(bookingDate, 'MMM d, yyyy')} at ${format(bookingDate, 'h:mm a')}.`)}`}
+                          href={`https://wa.me/${booking.salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + booking.salon.owner.phone.replace(/\D/g, '') : booking.salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${toTitleCase(booking.salon.owner.name)}, I have an upcoming appointment at ${toTitleCase(booking.salon.name)} for ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')}.`)}`}
                           target="_blank" 
                           rel="noreferrer" 
                           className="text-white bg-[#25D366] hover:bg-[#128C7E] px-3 md:px-5 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-semibold transition-colors flex items-center justify-center shadow-sm"

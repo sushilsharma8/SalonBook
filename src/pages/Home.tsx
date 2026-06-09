@@ -184,7 +184,15 @@ export default function Home() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {filteredSalons.map(salon => {
-          const images = salon.images ? JSON.parse(salon.images) : ['https://picsum.photos/seed/salon/400/300'];
+          let images = ['https://picsum.photos/seed/salon/400/300'];
+          if (salon.images) {
+            try {
+              const parsed = JSON.parse(salon.images);
+              if (Array.isArray(parsed) && parsed.length > 0) images = parsed;
+            } catch {
+              /* use fallback image */
+            }
+          }
           const avgRating = salon.avgRating != null ? salon.avgRating.toFixed(1) : 'New';
 
           return (

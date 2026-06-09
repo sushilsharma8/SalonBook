@@ -1,10 +1,10 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { format } from 'date-fns';
+import { formatBookingTime } from '../lib/bookingTime';
 import { buildDefaultWeeklyHours, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
 import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ScanLine } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
-import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi } from '../lib/serviceImport';
+import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
 
 const CATEGORIES = [
   { id: 'hair', label: 'Hair salon', icon: Scissors },
@@ -326,7 +326,6 @@ export default function SellerDashboard() {
         if (booking?.user?.phone) {
           const phone = booking.user.phone.replace(/\D/g, '');
           const phoneNum = phone.length === 10 ? '91' + phone : phone;
-          const bDate = new Date(booking.startTime);
           const services = booking.services.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ');
           const statusLabel = status === 'CONFIRMED'
             ? 'confirmed'
@@ -336,10 +335,10 @@ export default function SellerDashboard() {
                 ? 'marked as no-show'
                 : 'completed';
           const msg = status === 'CANCELLED'
-            ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled. Please contact us to reschedule.`
+            ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been cancelled. Please contact us to reschedule.`
             : status === 'NO_SHOW'
-              ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} was marked as no-show.`
-            : `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting us!'}`;
+              ? `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} was marked as no-show.`
+            : `Hello ${booking.user.name}, your booking for ${services} at ${salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been ${statusLabel}! ${status === 'CONFIRMED' ? 'See you soon!' : 'Thank you for visiting us!'}`;
           window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
         }
       }
@@ -387,8 +386,9 @@ export default function SellerDashboard() {
     setExtractingMenu(true);
 
     try {
+      const prepared = await prepareMenuImageForUpload(file);
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', prepared);
 
       const res = await fetch('/api/seller/services/extract-from-menu', {
         method: 'POST',
@@ -398,7 +398,10 @@ export default function SellerDashboard() {
 
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setImportError(data?.error || `Failed to extract services (HTTP ${res.status})`);
+        const fallback = res.status === 503
+          ? 'AI service is temporarily busy. Please wait a few seconds and try again.'
+          : `Failed to extract services (HTTP ${res.status})`;
+        setImportError(data?.error || fallback);
         return;
       }
 
@@ -736,9 +739,7 @@ export default function SellerDashboard() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {bookings.map(booking => {
-                    const bookingDate = new Date(booking.startTime);
-                    return (
+                  {bookings.map(booking => (
                       <div key={booking.id} className="bg-white p-6 rounded-[2rem] border border-stone-200/60 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md hover:border-stone-300">
                         <div className="flex items-start space-x-5 flex-1">
                           <div className="w-14 h-14 bg-stone-50 rounded-2xl flex items-center justify-center border border-stone-100 shrink-0 hidden sm:flex">
@@ -771,7 +772,7 @@ export default function SellerDashboard() {
                               </div>
                               <div className="flex items-center text-stone-600 sm:col-span-2">
                                 <Calendar className="w-4 h-4 mr-2 text-stone-400" />
-                                <span>{format(bookingDate, 'EEEE, MMMM d, yyyy')} at <span className="font-medium text-stone-900">{format(bookingDate, 'h:mm a')}</span></span>
+                                <span>{formatBookingTime(booking.startTime, 'EEEE, MMMM d, yyyy')} at <span className="font-medium text-stone-900">{formatBookingTime(booking.startTime, 'h:mm a')}</span></span>
                               </div>
                             </div>
                           </div>
@@ -782,7 +783,7 @@ export default function SellerDashboard() {
                           
                           {booking.user?.phone && (
                             <a 
-                              href={`https://wa.me/${booking.user.phone.replace(/\D/g, '').length === 10 ? '91' + booking.user.phone.replace(/\D/g, '') : booking.user.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${booking.user.name}, regarding your appointment on ${format(bookingDate, 'MMM d, yyyy')} at ${format(bookingDate, 'h:mm a')}.`)}`}
+                              href={`https://wa.me/${booking.user.phone.replace(/\D/g, '').length === 10 ? '91' + booking.user.phone.replace(/\D/g, '') : booking.user.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${booking.user.name}, regarding your appointment on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')}.`)}`}
                               target="_blank" 
                               rel="noreferrer" 
                               className="w-full md:w-auto flex items-center justify-center px-4 py-2 bg-[#25D366] text-white hover:bg-[#128C7E] rounded-xl text-sm font-bold transition-colors shadow-sm"
@@ -814,8 +815,7 @@ export default function SellerDashboard() {
                           )}
                         </div>
                       </div>
-                    );
-                  })}
+                    ))}
                 </div>
               )}
             </div>

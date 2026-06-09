@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { format } from 'date-fns';
+import { formatBookingTime } from '../lib/bookingTime';
 import { CheckCircle, XCircle, Calendar, Clock, User, Scissors, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -48,11 +48,10 @@ export default function BookingAction() {
       if (booking.user?.phone) {
         const phone = booking.user.phone.replace(/\D/g, '');
         const phoneNum = phone.length === 10 ? '91' + phone : phone;
-        const bDate = new Date(booking.startTime);
         const svcNames = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'your appointment';
         const msg = action === 'CONFIRMED'
-          ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been confirmed! See you soon!`
-          : `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${format(bDate, 'MMM d, yyyy')} at ${format(bDate, 'h:mm a')} has been cancelled. Please contact us to reschedule.`;
+          ? `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been confirmed! See you soon!`
+          : `Hello ${booking.user.name}, your booking for ${svcNames} at ${booking.salon?.name} on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')} has been cancelled. Please contact us to reschedule.`;
         window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
       }
     } catch (err: any) {
@@ -89,7 +88,6 @@ export default function BookingAction() {
 
   if (!booking) return null;
 
-  const bookingDate = new Date(booking.startTime);
   const services = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'Service';
   const isPending = booking.status === 'PENDING';
 
@@ -128,11 +126,11 @@ export default function BookingAction() {
           </div>
           <div className="flex items-center space-x-3 text-stone-700">
             <Calendar className="w-5 h-5 text-stone-400 shrink-0" />
-            <span>{format(bookingDate, 'EEEE, MMMM d, yyyy')}</span>
+            <span>{formatBookingTime(booking.startTime, 'EEEE, MMMM d, yyyy')}</span>
           </div>
           <div className="flex items-center space-x-3 text-stone-700">
             <Clock className="w-5 h-5 text-stone-400 shrink-0" />
-            <span>{format(bookingDate, 'h:mm a')} ({booking.staff?.name})</span>
+            <span>{formatBookingTime(booking.startTime, 'h:mm a')} ({booking.staff?.name})</span>
           </div>
         </div>
 
