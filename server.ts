@@ -35,8 +35,27 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'salon-images';
 const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER || 'salons';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MENU_MODEL = process.env.GEMINI_MENU_MODEL || 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MENU_MODEL_CHAIN = [
+  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+] as const;
 const GOOGLE_MAPS_PLATFORM_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY;
+
+function getGeminiMenuModelChain(): string[] {
+  const fromList = process.env.GEMINI_MENU_MODELS;
+  if (fromList?.trim()) {
+    const models = fromList.split(',').map((model) => model.trim()).filter(Boolean);
+    if (models.length > 0) return models;
+  }
+
+  const preferred = process.env.GEMINI_MENU_MODEL?.trim();
+  if (preferred) {
+    const fallbacks = DEFAULT_GEMINI_MENU_MODEL_CHAIN.filter((model) => model !== preferred);
+    return [preferred, ...fallbacks];
+  }
+
+  return [...DEFAULT_GEMINI_MENU_MODEL_CHAIN];
+}
 
 async function geocodeSalonAddress(
   address: string,
@@ -209,13 +228,25 @@ function normalizeMenuImageMimeType(mimeType: string, originalName?: string): st
   return normalized || 'application/octet-stream';
 }
 
-function parseGeminiExtractionError(error: unknown): { status: number; error: string } {
-  const fallback = { status: 500, error: 'Failed to extract services from menu photo' };
+type GeminiExtractionError = {
+  status: number;
+  error: string;
+  tryNextModel: boolean;
+};
+
+function parseGeminiExtractionError(error: unknown): GeminiExtractionError {
+  const fallback: GeminiExtractionError = {
+    status: 500,
+    error: 'Failed to extract services from menu photo',
+    tryNextModel: true,
+  };
   if (!error || typeof error !== 'object') return fallback;
 
   let message = typeof (error as { message?: unknown }).message === 'string'
     ? (error as { message: string }).message
     : fallback.error;
+  let statusCode: number | string | undefined;
+  let apiStatus: string | undefined;
 
   if (message.trim().startsWith('{')) {
     try {
@@ -224,16 +255,8 @@ function parseGeminiExtractionError(error: unknown): { status: number; error: st
       if (apiError?.message) {
         message = apiError.message;
       }
-      const unavailable =
-        apiError?.status === 'UNAVAILABLE' ||
-        apiError?.code === 503 ||
-        apiError?.code === 'UNAVAILABLE';
-      if (unavailable) {
-        return {
-          status: 503,
-          error: 'AI service is temporarily busy. Please wait a few seconds and try again.',
-        };
-      }
+      statusCode = apiError?.code;
+      apiStatus = apiError?.status;
     } catch {
       // Keep the original message when nested JSON parsing fails.
     }
@@ -243,22 +266,55 @@ function parseGeminiExtractionError(error: unknown): { status: number; error: st
     return {
       status: 400,
       error: 'Unsupported image format. Use JPG or PNG. On iPhone, set Camera → Formats → Most Compatible.',
+      tryNextModel: false,
     };
   }
 
-  if (/high demand|try again later|UNAVAILABLE/i.test(message)) {
+  if (/API key not valid|invalid authentication|permission denied|PERMISSION_DENIED/i.test(message)) {
     return {
       status: 503,
-      error: 'AI service is temporarily busy. Please wait a few seconds and try again.',
+      error: 'AI extraction is not configured correctly. Check GEMINI_API_KEY on the server.',
+      tryNextModel: false,
     };
   }
 
-  return { status: 500, error: message };
+  const isRateLimited =
+    statusCode === 429 ||
+    statusCode === 'RESOURCE_EXHAUSTED' ||
+    apiStatus === 'RESOURCE_EXHAUSTED' ||
+    /rate limit|quota exceeded|too many requests/i.test(message);
+
+  const isUnavailable =
+    statusCode === 503 ||
+    statusCode === 'UNAVAILABLE' ||
+    apiStatus === 'UNAVAILABLE' ||
+    /high demand|try again later|UNAVAILABLE/i.test(message);
+
+  const isModelMissing =
+    statusCode === 404 ||
+    statusCode === 'NOT_FOUND' ||
+    apiStatus === 'NOT_FOUND' ||
+    /model not found|is not supported|not available/i.test(message);
+
+  if (isRateLimited || isUnavailable || isModelMissing) {
+    return {
+      status: 503,
+      error: 'AI service is temporarily busy. Switching to another model...',
+      tryNextModel: true,
+    };
+  }
+
+  return { status: 500, error: message, tryNextModel: true };
 }
 
-async function generateMenuExtraction(ai: GoogleGenAI, mimeType: string, base64Data: string) {
+async function generateMenuExtraction(
+  ai: GoogleGenAI,
+  model: string,
+  mimeType: string,
+  base64Data: string,
+) {
   return ai.models.generateContent({
-    model: GEMINI_MENU_MODEL,
+    model,
     contents: [
       {
         role: 'user',
@@ -273,6 +329,97 @@ async function generateMenuExtraction(ai: GoogleGenAI, mimeType: string, base64D
       responseSchema: MENU_EXTRACTION_SCHEMA,
     },
   });
+}
+
+async function extractServicesWithModelFallback(
+  ai: GoogleGenAI,
+  mimeType: string,
+  base64Data: string,
+): Promise<
+  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices>; model: string }
+  | { ok: false; status: number; error: string }
+> {
+  const models = getGeminiMenuModelChain();
+  let lastError: GeminiExtractionError = {
+    status: 503,
+    error: 'AI service is temporarily busy. Please wait a few seconds and try again.',
+    tryNextModel: false,
+  };
+
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    const hasNextModel = index < models.length - 1;
+
+    try {
+      const response = await generateMenuExtraction(ai, model, mimeType, base64Data);
+      const rawText = response.text?.trim();
+      if (!rawText) {
+        lastError = {
+          status: 502,
+          error: 'AI returned an empty response. Try a clearer photo.',
+          tryNextModel: hasNextModel,
+        };
+        if (hasNextModel) {
+          console.warn(`Menu extraction with ${model} returned empty text; trying next model.`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+        break;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        lastError = {
+          status: 502,
+          error: 'AI returned invalid JSON. Try again with a clearer photo.',
+          tryNextModel: hasNextModel,
+        };
+        if (hasNextModel) {
+          console.warn(`Menu extraction with ${model} returned invalid JSON; trying next model.`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+        break;
+      }
+
+      const services = sanitizeExtractedServices(parsed);
+      if (services.length === 0) {
+        lastError = {
+          status: 422,
+          error: 'No services could be extracted from this image. Try a clearer photo of your rate list.',
+          tryNextModel: hasNextModel,
+        };
+        if (hasNextModel) {
+          console.warn(`Menu extraction with ${model} found no services; trying next model.`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+        break;
+      }
+
+      return { ok: true, services, model };
+    } catch (error) {
+      const parsed = parseGeminiExtractionError(error);
+      lastError = parsed;
+      console.warn(`Menu extraction failed with ${model}:`, parsed.error);
+
+      if (!parsed.tryNextModel || !hasNextModel) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastError.status,
+    error: lastError.status === 503
+      ? 'AI service is temporarily busy on all available models. Please wait a few seconds and try again.'
+      : lastError.error,
+  };
 }
 
 async function extractServicesFromMenuFile(
@@ -299,46 +446,12 @@ async function extractServicesFromMenuFile(
       };
     }
 
-    let response;
-    try {
-      response = await generateMenuExtraction(ai, mimeType, base64Data);
-    } catch (firstError) {
-      const parsed = parseGeminiExtractionError(firstError);
-      if (parsed.status === 503) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        try {
-          response = await generateMenuExtraction(ai, mimeType, base64Data);
-        } catch (retryError) {
-          const retryParsed = parseGeminiExtractionError(retryError);
-          return { ok: false, status: retryParsed.status, error: retryParsed.error };
-        }
-      } else {
-        return { ok: false, status: parsed.status, error: parsed.error };
-      }
+    const result = await extractServicesWithModelFallback(ai, mimeType, base64Data);
+    if (result.ok === false) {
+      return { ok: false, status: result.status, error: result.error };
     }
 
-    const rawText = response.text?.trim();
-    if (!rawText) {
-      return { ok: false, status: 502, error: 'AI returned an empty response. Try a clearer photo.' };
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      return { ok: false, status: 502, error: 'AI returned invalid JSON. Try again with a clearer photo.' };
-    }
-
-    const services = sanitizeExtractedServices(parsed);
-    if (services.length === 0) {
-      return {
-        ok: false,
-        status: 422,
-        error: 'No services could be extracted from this image. Try a clearer photo of your rate list.',
-      };
-    }
-
-    return { ok: true, services };
+    return { ok: true, services: result.services };
   } catch (error: any) {
     console.error('Menu extraction failed:', error);
     const parsed = parseGeminiExtractionError(error);
