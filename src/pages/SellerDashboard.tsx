@@ -1,10 +1,12 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { formatBookingTime } from '../lib/bookingTime';
 import { buildDefaultWeeklyHours, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
 import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ScanLine } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
 import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
+import { SalonQRCard } from '../components/SalonQRCard';
 
 const CATEGORIES = [
   { id: 'hair', label: 'Hair salon', icon: Scissors },
@@ -29,16 +31,16 @@ const getStaffAvatarClasses = (gender?: string | null) => {
   return 'bg-stone-100 text-stone-700 border-stone-200';
 };
 
-const SellerSalonForm = lazy(() =>
+const SellerSalonForm = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerSalonForm })),
 );
-const SellerServiceForm = lazy(() =>
+const SellerServiceForm = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerServiceForm })),
 );
-const SellerStaffForm = lazy(() =>
+const SellerStaffForm = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerStaffForm })),
 );
-const SellerMenuImportReviewModal = lazy(() =>
+const SellerMenuImportReviewModal = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
 );
 
@@ -555,6 +557,10 @@ export default function SellerDashboard() {
         </div>
       )}
 
+      {salon && !showSalonForm && (
+        <SalonQRCard salonId={salon.id} salonName={salon.name} />
+      )}
+
       {showSalonForm && (
         <Suspense fallback={<FormFallback />}>
           <SellerSalonForm
@@ -615,7 +621,6 @@ export default function SellerDashboard() {
                   ref={menuImageInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   className="hidden"
                   onChange={handleMenuImageSelect}
                 />

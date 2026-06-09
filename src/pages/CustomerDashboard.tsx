@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { bookingTimeMs, formatBookingTime, isBookingUpcoming } from '../lib/bookingTime';
+import { buildGoogleMapsDirectionsUrl } from '../lib/maps';
 import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -403,7 +404,12 @@ export default function CustomerDashboard() {
                       )}
                       {isUpcoming && (
                         <a 
-                          href={`https://maps.google.com/?q=${encodeURIComponent(booking.salon.address || booking.salon.name)}`} 
+                          href={buildGoogleMapsDirectionsUrl({
+                            lat: booking.salon.lat,
+                            lng: booking.salon.lng,
+                            address: booking.salon.address,
+                            name: booking.salon.name,
+                          })} 
                           target="_blank" 
                           rel="noreferrer" 
                           className="text-stone-700 bg-stone-100 hover:bg-stone-200 px-3 md:px-5 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-semibold transition-colors flex items-center justify-center border border-stone-200"

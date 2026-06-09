@@ -3,19 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Suspense, lazy, type ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/useAuthStore';
+import { lazyWithRetry } from './lib/lazyWithRetry';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
-const SalonDetails = lazy(() => import('./pages/SalonDetails'));
-const CustomerDashboard = lazy(() => import('./pages/CustomerDashboard'));
-const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const BookingAction = lazy(() => import('./pages/BookingAction'));
-const AdminSalonManage = lazy(() => import('./pages/AdminSalonManage'));
+const SalonDetails = lazyWithRetry(() => import('./pages/SalonDetails'));
+const CustomerDashboard = lazyWithRetry(() => import('./pages/CustomerDashboard'));
+const SellerDashboard = lazyWithRetry(() => import('./pages/SellerDashboard'));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+const BookingAction = lazyWithRetry(() => import('./pages/BookingAction'));
+const AdminSalonManage = lazyWithRetry(() => import('./pages/AdminSalonManage'));
 
 function ProtectedRoute({
   children,

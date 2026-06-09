@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { GoogleGenAI } from '@google/genai';
 import { MapPin, Star, Navigation, Search, Sparkles, Loader2 } from 'lucide-react';
+import { buildGoogleMapsDirectionsUrl, extractLatLng } from '../lib/maps';
 
 const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
@@ -257,7 +258,11 @@ function MapContent() {
                   </div>
                 )}
                 <a 
-                  href={`https://maps.google.com/?q=${encodeURIComponent(selectedPlace.formattedAddress || selectedPlace.displayName || '')}`}
+                  href={buildGoogleMapsDirectionsUrl({
+                    ...(extractLatLng(selectedPlace.location) ?? {}),
+                    address: selectedPlace.formattedAddress,
+                    name: selectedPlace.displayName,
+                  })}
                   target="_blank"
                   rel="noreferrer"
                   className="block w-full text-center bg-stone-900 text-white text-xs font-bold py-1.5 rounded-lg hover:bg-stone-800 transition-colors"

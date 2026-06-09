@@ -1,12 +1,13 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { formatBookingTime } from '../lib/bookingTime';
 import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle, ScanLine } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
 import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
 
-const SellerMenuImportReviewModal = lazy(() =>
+const SellerMenuImportReviewModal = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
 );
 
@@ -395,7 +396,6 @@ export default function AdminSalonManage() {
               ref={menuImageInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               className="hidden"
               onChange={handleMenuImageSelect}
             />

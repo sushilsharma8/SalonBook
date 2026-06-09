@@ -36,6 +36,34 @@ const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'salon-im
 const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER || 'salons';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MENU_MODEL = process.env.GEMINI_MENU_MODEL || 'gemini-2.5-flash';
+const GOOGLE_MAPS_PLATFORM_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY;
+
+async function geocodeSalonAddress(
+  address: string,
+  name?: string,
+): Promise<{ lat: number; lng: number } | null> {
+  if (!GOOGLE_MAPS_PLATFORM_KEY || !address?.trim()) return null;
+
+  const query = name?.trim() ? `${name.trim()}, ${address.trim()}` : address.trim();
+  const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+  url.searchParams.set('address', query);
+  url.searchParams.set('key', GOOGLE_MAPS_PLATFORM_KEY);
+
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    const location = data?.results?.[0]?.geometry?.location;
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+    if (data?.status === 'OK' && Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  } catch (error) {
+    console.error('Geocoding failed:', error);
+  }
+
+  return null;
+}
 
 let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
 let geminiClient: GoogleGenAI | null = null;
@@ -1298,15 +1326,26 @@ export async function createApp() {
       const hoursPayload = parseWeeklyHoursInput(weeklyHours, openTime, closeTime);
       validateWeeklyHours(hoursPayload);
 
+      const coords = await geocodeSalonAddress(address, name);
+
       let salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      const salonData = {
+        name,
+        address,
+        categories,
+        images,
+        openTime,
+        closeTime,
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+      };
       if (salon) {
         salon = await prisma.salon.update({
           where: { id: salon.id },
-          data: { name, address, categories, images, openTime, closeTime }
+          data: salonData,
         });
       } else {
         salon = await prisma.salon.create({
-          data: { name, address, categories, images, openTime, closeTime, ownerId: req.user.userId }
+          data: { ...salonData, ownerId: req.user.userId },
         });
       }
 
@@ -2004,9 +2043,18 @@ export async function createApp() {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
     const { name, address, openTime, closeTime, images, categories } = req.body;
     try {
+      const coords = await geocodeSalonAddress(address, name);
       const salon = await prisma.salon.update({
         where: { id: req.params.id },
-        data: { name, address, openTime, closeTime, images, categories }
+        data: {
+          name,
+          address,
+          openTime,
+          closeTime,
+          images,
+          categories,
+          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+        },
       });
       invalidateSalonsListCache();
       res.json(salon);
