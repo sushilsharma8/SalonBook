@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>SalonBook</title>
+    <script>
+      (function () {
+        var key = 'salonbook:entry-reload';
+        window.addEventListener('error', function (ev) {
+          var t = ev.target;
+          if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
+          var url = t.src || t.href || '';
+          if (url.indexOf('/assets/') === -1) return;
+          if (sessionStorage.getItem(key)) return;
+          sessionStorage.setItem(key, '1');
+          location.reload();
+        }, true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

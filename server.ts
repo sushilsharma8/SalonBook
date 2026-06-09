@@ -2299,8 +2299,23 @@ export async function createApp() {
     const distPathFromModule = path.join(__dirname, 'dist');
     const distPathFromCwd = path.join(process.cwd(), 'dist');
     const distPath = fs.existsSync(distPathFromModule) ? distPathFromModule : distPathFromCwd;
-    app.use(express.static(distPath));
+    const noStoreHtml = (res: Response) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    };
+    app.use(express.static(distPath, {
+      index: false,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('index.html')) {
+          noStoreHtml(res);
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }));
     app.get('*', (req: Request, res: Response) => {
+      noStoreHtml(res);
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
