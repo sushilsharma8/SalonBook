@@ -140,7 +140,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <ul className="space-y-2 text-sm text-stone-500">
                 <li><a href="#" className="hover:text-stone-900 transition-colors">About Us</a></li>
                 <li><a href="#" className="hover:text-stone-900 transition-colors">Careers</a></li>
-                <li><a href="#" className="hover:text-stone-900 transition-colors">Contact</a></li>
+                <li><Link to="/contact" className="hover:text-stone-900 transition-colors">Contact</Link></li>
               </ul>
             </div>
             <div>
