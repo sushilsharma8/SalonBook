@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw } from 'lucide-react';
+import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw, KeyRound } from 'lucide-react';
+import { Button } from '../components/ui/Button';
 import { Link } from 'react-router-dom';
 
 export default function AdminDashboard() {
@@ -13,6 +14,11 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'salons'>('dashboard');
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [resetUser, setResetUser] = useState<{ id: string; name: string } | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -52,6 +58,56 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const openResetPassword = (user: { id: string; name: string }) => {
+    setResetUser(user);
+    setNewPassword('');
+    setConfirmPassword('');
+    setResetError('');
+  };
+
+  const closeResetPassword = () => {
+    setResetUser(null);
+    setNewPassword('');
+    setConfirmPassword('');
+    setResetError('');
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetUser) return;
+    if (newPassword.length < 6) {
+      setResetError('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setResetError('Passwords do not match');
+      return;
+    }
+    setResetLoading(true);
+    setResetError('');
+    try {
+      const res = await fetch(`/api/admin/users/${resetUser.id}/password`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setResetError(data?.error || 'Failed to reset password');
+        return;
+      }
+      closeResetPassword();
+      flash('success', `Password reset for ${resetUser.name}`);
+    } catch {
+      setResetError('Failed to reset password');
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -104,6 +160,50 @@ export default function AdminDashboard() {
           message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
         }`}>
           {message.text}
+        </div>
+      )}
+      {resetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-stone-200 p-6">
+            <h3 className="text-xl font-bold text-stone-900 mb-1">Reset Password</h3>
+            <p className="text-sm text-stone-500 mb-6">Set a new password for <span className="font-medium text-stone-700">{resetUser.name}</span>.</p>
+            {resetError && (
+              <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm border border-red-100">{resetError}</div>
+            )}
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">New password</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  autoFocus
+                  className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none bg-stone-50/50"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-2">Confirm password</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  className="w-full px-4 py-3 rounded-xl border border-stone-200 focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none bg-stone-50/50"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button type="button" variant="secondary" fullWidth onClick={closeResetPassword} disabled={resetLoading}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" fullWidth loading={resetLoading}>
+                  Reset Password
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
       <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -272,6 +372,9 @@ export default function AdminDashboard() {
                     <td className="py-4 text-right">
                       {u.role !== 'ADMIN' && (
                         <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => openResetPassword({ id: u.id, name: u.name })} className="p-2 text-stone-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors" title="Reset Password">
+                            <KeyRound className="w-5 h-5" />
+                          </button>
                           {!u.isActive && (
                             <button onClick={() => handleReactivateUser(u.id)} className="p-2 text-stone-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors" title="Reactivate User">
                               <RotateCcw className="w-5 h-5" />
@@ -314,6 +417,7 @@ export default function AdminDashboard() {
                 </div>
                 {u.role !== 'ADMIN' ? (
                   <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => openResetPassword({ id: u.id, name: u.name })} className="p-2 text-stone-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors" title="Reset Password"><KeyRound className="w-4 h-4" /></button>
                     {!u.isActive && (
                       <button onClick={() => handleReactivateUser(u.id)} className="p-2 text-stone-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"><RotateCcw className="w-4 h-4" /></button>
                     )}

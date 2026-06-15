@@ -802,6 +802,33 @@ paths:
         '200':
           description: User list
 
+  /api/admin/users/{id}/password:
+    put:
+      tags: [Admin]
+      summary: Reset a user's password
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 6
+      responses:
+        '200':
+          description: Password updated
+
   /api/admin/salons:
     get:
       tags: [Admin]

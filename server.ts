@@ -2025,6 +2025,31 @@ export async function createApp() {
     }
   });
 
+  // Admin: Reset a user's password
+  app.put('/api/admin/users/:id/password', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const { password } = req.body;
+      if (!password || String(password).length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
+      const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.role === 'ADMIN') return res.status(400).json({ error: 'Cannot reset an admin password' });
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to reset password' });
+    }
+  });
+
   // Admin: Reactivate user account
   app.post('/api/admin/users/:id/reactivate', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
