@@ -11,12 +11,17 @@ import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+
+const Landing = lazyWithRetry(() => import('./pages/Landing'));
 const SalonDetails = lazyWithRetry(() => import('./pages/SalonDetails'));
 const CustomerDashboard = lazyWithRetry(() => import('./pages/CustomerDashboard'));
 const SellerDashboard = lazyWithRetry(() => import('./pages/SellerDashboard'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
 const BookingAction = lazyWithRetry(() => import('./pages/BookingAction'));
 const AdminSalonManage = lazyWithRetry(() => import('./pages/AdminSalonManage'));
+const ContactUs = lazyWithRetry(() => import('./pages/ContactUs'));
+const TermsOfService = lazyWithRetry(() => import('./pages/TermsOfService'));
+const PrivacyPolicy = lazyWithRetry(() => import('./pages/PrivacyPolicy'));
 
 function ProtectedRoute({
   children,
@@ -44,60 +49,74 @@ function RouteFallback() {
   return <div className="py-10 text-center text-stone-500">Loading page...</div>;
 }
 
-export default function App() {
+function AppShell() {
   return (
-    <Router>
-      <Layout>
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/salon/:id" element={<SalonDetails />} />
-            <Route
-              path="/booking/action/:token"
-              element={
-                <ProtectedRoute roles={['SELLER', 'ADMIN']}>
-                  <BookingAction />
-                </ProtectedRoute>
-              }
-            />
-            <Route 
-              path="/dashboard/customer" 
-              element={
-                <ProtectedRoute role="CUSTOMER">
-                  <CustomerDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/dashboard/seller" 
-              element={
-                <ProtectedRoute role="SELLER">
-                  <SellerDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/dashboard/admin" 
-              element={
-                <ProtectedRoute role="ADMIN">
-                  <AdminDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/admin/salon/:id" 
-              element={
-                <ProtectedRoute role="ADMIN">
-                  <AdminSalonManage />
-                </ProtectedRoute>
-              } 
-            />
-          </Routes>
-        </Suspense>
-      </Layout>
-    </Router>
+    <Layout>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/explore" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/contact" element={<ContactUs />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/salon/:id" element={<SalonDetails />} />
+          <Route
+            path="/booking/action/:token"
+            element={
+              <ProtectedRoute roles={['SELLER', 'ADMIN']}>
+                <BookingAction />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/customer"
+            element={
+              <ProtectedRoute role="CUSTOMER">
+                <CustomerDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/seller"
+            element={
+              <ProtectedRoute role="SELLER">
+                <SellerDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/admin"
+            element={
+              <ProtectedRoute role="ADMIN">
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/salon/:id"
+            element={
+              <ProtectedRoute role="ADMIN">
+                <AdminSalonManage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/explore" replace />} />
+        </Routes>
+      </Suspense>
+    </Layout>
   );
 }
 
+export default function App() {
+  return (
+    <Router>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="*" element={<AppShell />} />
+        </Routes>
+      </Suspense>
+    </Router>
+  );
+}

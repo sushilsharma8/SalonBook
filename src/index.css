@@ -6,6 +6,10 @@
   --font-display: "Outfit", system-ui, sans-serif;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background-color: #fafaf9; /* stone-50 */
   color: #1c1917; /* stone-900 */
@@ -83,4 +87,17 @@ h1, h2, h3, h4, h5, h6 {
 
 .btn-interactive:active {
   transform: scale(0.97);
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee var(--marquee-duration, 35s) linear infinite;
 }

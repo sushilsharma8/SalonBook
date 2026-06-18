@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { Star, MapPin, Clock, Search, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ArrowRight } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Star, MapPin, Clock, Search, ArrowRight } from 'lucide-react';
+import { CATEGORIES } from '../lib/categories';
 
 interface Salon {
   id: string;
@@ -15,26 +16,19 @@ interface Salon {
   avgRating: number | null;
 }
 
-const CATEGORIES = [
-  { id: 'hair', label: 'Hair', icon: Scissors },
-  { id: 'nails', label: 'Nails', icon: Sparkles },
-  { id: 'eyebrows', label: 'Lashes', icon: Eye },
-  { id: 'beauty', label: 'Beauty', icon: Sparkles },
-  { id: 'medspa', label: 'Medspa', icon: Activity },
-  { id: 'barber', label: 'Barber', icon: Scissors },
-  { id: 'massage', label: 'Massage', icon: Activity },
-  { id: 'spa', label: 'Spa', icon: ThermometerSun },
-  { id: 'waxing', label: 'Waxing', icon: Droplet },
-  { id: 'tattoo', label: 'Tattoo', icon: PenTool },
-  { id: 'tanning', label: 'Tanning', icon: Sun },
-  { id: 'fitness', label: 'Fitness', icon: Dumbbell },
-];
-
 export default function Home() {
   const [salons, setSalons] = useState<Salon[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const categoryParam = searchParams.get('category');
+    if (categoryParam && CATEGORIES.some((c) => c.id === categoryParam)) {
+      setSelectedCategory(categoryParam);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetch('/api/salons')

@@ -26,7 +26,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <header className="bg-white/80 backdrop-blur-md border-b border-stone-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <Link to="/" className="flex items-center space-x-2 text-stone-900 shrink-0">
+            <Link to="/explore" className="flex items-center space-x-2 text-stone-900 shrink-0">
               <Scissors className="h-6 w-6" />
               <span className="font-bold text-xl tracking-tight font-display">SalonBook</span>
             </Link>
@@ -127,7 +127,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
             <div className="col-span-1 md:col-span-2">
-              <Link to="/" className="flex items-center space-x-2 text-stone-900 mb-4">
+              <Link to="/explore" className="flex items-center space-x-2 text-stone-900 mb-4">
                 <Scissors className="h-6 w-6" />
                 <span className="font-bold text-xl tracking-tight font-display">SalonBook</span>
               </Link>
@@ -146,8 +146,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div>
               <h4 className="font-bold text-stone-900 mb-4">Legal</h4>
               <ul className="space-y-2 text-sm text-stone-500">
-                <li><a href="#" className="hover:text-stone-900 transition-colors">Terms of Service</a></li>
-                <li><a href="#" className="hover:text-stone-900 transition-colors">Privacy Policy</a></li>
+                <li><Link to="/terms" className="hover:text-stone-900 transition-colors">Terms of Service</Link></li>
+                <li><Link to="/privacy" className="hover:text-stone-900 transition-colors">Privacy Policy</Link></li>
                 <li><a href="#" className="hover:text-stone-900 transition-colors">Cookie Policy</a></li>
               </ul>
             </div>

@@ -3,7 +3,7 @@ import { Mail, MessageCircle, Phone, Headphones } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
 const SUPPORT_PHONE = '8283992627';
-const SUPPORT_EMAIL = 'salonbook7@gmail.com';
+const SUPPORT_EMAIL = 'supportsalonbook@gmail.com';
 
 const phoneDisplay = `+91 ${SUPPORT_PHONE.slice(0, 5)} ${SUPPORT_PHONE.slice(5)}`;
 const telHref = `tel:+91${SUPPORT_PHONE}`;
@@ -66,7 +66,7 @@ export default function ContactUs() {
         </div>
 
         <p className="text-center text-stone-500 text-sm mt-8">
-          Looking to book a service? <Link to="/" className="text-stone-900 font-semibold hover:underline">Browse salons</Link>
+          Looking to book a service? <Link to="/explore" className="text-stone-900 font-semibold hover:underline">Browse salons</Link>
         </p>
       </div>
     </div>

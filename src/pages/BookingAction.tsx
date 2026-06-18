@@ -79,7 +79,7 @@ export default function BookingAction() {
           {isForbidden ? 'Access Denied' : 'Link Invalid'}
         </h2>
         <p className="text-stone-500">{error}</p>
-        <Link to="/" className="inline-block mt-4 px-6 py-3 bg-stone-900 text-white rounded-xl font-bold hover:bg-stone-800 transition-colors">
+        <Link to="/explore" className="inline-block mt-4 px-6 py-3 bg-stone-900 text-white rounded-xl font-bold hover:bg-stone-800 transition-colors">
           Go Home
         </Link>
       </div>

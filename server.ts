@@ -1359,7 +1359,7 @@ export async function createApp() {
           _count: { select: { services: true, reviews: true } },
           reviews: { select: { rating: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { bookings: { _count: 'desc' } },
       });
 
       const salons = rows.map(({ reviews, _count, ...salon }) => {
