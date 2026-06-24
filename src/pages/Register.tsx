@@ -3,6 +3,7 @@ import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { Scissors, Sparkles, UserRound, Store, Phone } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { trackEvent, identifyUser, getPostHogHeaders } from '../lib/analytics';
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -59,13 +60,17 @@ export default function Register() {
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getPostHogHeaders() },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      
+
       login(data.user, data.token);
+      identifyUser(data.user.id, { name: data.user.name, email: data.user.email, role: data.user.role });
+      if (data.user.role === 'SELLER') {
+        trackEvent('seller_signup', { user_id: data.user.id });
+      }
       if (redirectTo) {
         navigate(redirectTo);
       } else {

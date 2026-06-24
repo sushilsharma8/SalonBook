@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Suspense, type ReactNode } from 'react';
+import { Suspense, type ReactNode, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/useAuthStore';
 import { lazyWithRetry } from './lib/lazyWithRetry';
+import { identifyUser, resetAnalytics } from './lib/analytics';
+import { AnalyticsProvider } from './components/AnalyticsProvider';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -108,15 +110,30 @@ function AppShell() {
   );
 }
 
+function AuthAnalyticsSync() {
+  const { user } = useAuthStore();
+  useEffect(() => {
+    if (user) {
+      identifyUser(user.id, { email: user.email, role: user.role, name: user.name });
+    } else {
+      resetAnalytics();
+    }
+  }, [user]);
+  return null;
+}
+
 export default function App() {
   return (
     <Router>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="*" element={<AppShell />} />
-        </Routes>
-      </Suspense>
+      <AuthAnalyticsSync />
+      <AnalyticsProvider>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="*" element={<AppShell />} />
+          </Routes>
+        </Suspense>
+      </AnalyticsProvider>
     </Router>
   );
 }

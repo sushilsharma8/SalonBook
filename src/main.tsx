@@ -1,7 +1,12 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { initAnalytics } from './lib/analytics';
+import { captureUtmFromUrl } from './lib/utm';
 import App from './App.tsx';
 import './index.css';
+
+initAnalytics();
+captureUtmFromUrl();
 
 class RootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };

@@ -2,16 +2,18 @@ import { useEffect, useState, useRef } from 'react';
 import { motion, useInView, useReducedMotion } from 'motion/react';
 import { Reveal } from './Reveal';
 
-interface SalonStat {
-  serviceCount: number;
-  reviewCount: number;
+interface PublicStats {
+  salons: number;
+  services: number;
+  reviews: number;
+  cities: number;
 }
 
-const FALLBACK_STATS = {
-  salons: 50,
-  services: 500,
-  reviews: 200,
-  cities: 12,
+const FALLBACK_STATS: PublicStats = {
+  salons: 0,
+  services: 0,
+  reviews: 0,
+  cities: 1,
 };
 
 function useCountUp(target: number, duration = 2000, enabled = true) {
@@ -65,27 +67,29 @@ function StatCard({ label, value, suffix = '' }: { label: string; value: number;
 }
 
 export default function Stats() {
-  const [stats, setStats] = useState(FALLBACK_STATS);
+  const [stats, setStats] = useState<PublicStats>(FALLBACK_STATS);
 
   useEffect(() => {
-    fetch('/api/salons')
+    fetch('/api/public/stats')
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        return data as SalonStat[];
+        return data as PublicStats;
       })
-      .then((salons) => {
+      .then((data) => {
         setStats({
-          salons: salons.length || FALLBACK_STATS.salons,
-          services: salons.reduce((acc, s) => acc + s.serviceCount, 0) || FALLBACK_STATS.services,
-          reviews: salons.reduce((acc, s) => acc + s.reviewCount, 0) || FALLBACK_STATS.reviews,
-          cities: FALLBACK_STATS.cities,
+          salons: data.salons,
+          services: data.services,
+          reviews: data.reviews,
+          cities: Math.max(data.cities, 1),
         });
       })
       .catch(() => {
         /* keep fallback */
       });
   }, []);
+
+  const showSuffix = (n: number) => (n > 0 ? '+' : '');
 
   return (
     <section className="py-20 md:py-28 bg-gradient-to-br from-stone-800 to-stone-950 text-white relative overflow-hidden">
@@ -102,10 +106,10 @@ export default function Stats() {
         </Reveal>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          <StatCard label="Active salons" value={stats.salons} suffix="+" />
-          <StatCard label="Services listed" value={stats.services} suffix="+" />
-          <StatCard label="Customer reviews" value={stats.reviews} suffix="+" />
-          <StatCard label="Cities covered" value={stats.cities} suffix="+" />
+          <StatCard label="Active salons" value={stats.salons} suffix={showSuffix(stats.salons)} />
+          <StatCard label="Services listed" value={stats.services} suffix={showSuffix(stats.services)} />
+          <StatCard label="Customer reviews" value={stats.reviews} suffix={showSuffix(stats.reviews)} />
+          <StatCard label="Cities covered" value={stats.cities} suffix={showSuffix(stats.cities)} />
         </div>
       </div>
     </section>

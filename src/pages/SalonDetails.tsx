@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard } from 'lucide-react';
 import { format, addDays, startOfToday, isSameDay } from 'date-fns';
 import { buildBookingIso } from '../lib/bookingTime';
 import { isSalonOpenOnDate, normalizeWeeklyHoursFromApi } from '../lib/salonHours';
+import { trackEvent } from '../lib/analytics';
+import { getStoredUtm } from '../lib/utm';
 
 export default function SalonDetails() {
   const { id } = useParams();
@@ -12,8 +14,8 @@ export default function SalonDetails() {
   const { user, token } = useAuthStore();
   const salonPath = `/salon/${id}`;
 
-  const redirectToAuth = () => {
-    navigate('/login', { state: { from: salonPath } });
+  const redirectToSignup = () => {
+    navigate('/register', { state: { from: salonPath } });
   };
   const [salon, setSalon] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -40,10 +42,23 @@ export default function SalonDetails() {
     return exact || unisex || null;
   };
 
+  const getDisplayVariant = (service: any) => {
+    if (user) return getEffectiveVariant(service);
+    const variants = service.variants || [];
+    if (!variants.length) return null;
+    const unisex = variants.find((v: any) => v.targetGender === 'UNISEX');
+    if (unisex) return unisex;
+    return variants.reduce((min: any, v: any) => (!min || v.price < min.price ? v : min), null);
+  };
+
   const visibleServices = salon?.services?.filter((service: any) => {
     if (!user?.gender) return true;
     return Boolean(getEffectiveVariant(service));
   }) || [];
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [id]);
 
   useEffect(() => {
     fetch(`/api/salons/${id}`)
@@ -112,7 +127,7 @@ export default function SalonDetails() {
     setErrorMessage(null);
     setSuccessMessage(null);
     if (!user) {
-      redirectToAuth();
+      redirectToSignup();
       return;
     }
     if (user.role !== 'CUSTOMER') {
@@ -121,6 +136,7 @@ export default function SalonDetails() {
     }
     if (!selectedServices.length || !selectedTime) return;
 
+    trackEvent('booking_started', { salon_id: salon.id, service_count: selectedServices.length });
     setBookingLoading(true);
     try {
       const bookingTimeStr = buildBookingIso(selectedDate, selectedTime);
@@ -143,6 +159,11 @@ export default function SalonDetails() {
       const bookingData = await res.json();
       if (!res.ok) throw new Error(bookingData.error);
       
+      trackEvent('booking_completed', {
+        salon_id: salon.id,
+        booking_id: bookingData.id,
+        ...getStoredUtm(),
+      });
       setSuccessMessage('Booking successful! You can pay at the shop directly.');
 
       if (salon.owner?.phone && bookingData.actionToken) {
@@ -203,8 +224,31 @@ export default function SalonDetails() {
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
   if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
 
+  const localBusinessSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BeautySalon',
+    name: salon.name,
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: salon.address,
+      addressCountry: 'IN',
+    },
+    ...(salon.reviews?.length > 0 && {
+      aggregateRating: {
+        '@type': 'AggregateRating',
+        ratingValue: (
+          salon.reviews.reduce((sum: number, r: { rating: number }) => sum + r.rating, 0) /
+          salon.reviews.length
+        ).toFixed(1),
+        reviewCount: salon.reviews.length,
+      },
+    }),
+    url: typeof window !== 'undefined' ? `${window.location.origin}/salon/${salon.id}` : undefined,
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-24 lg:pb-8">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessSchema) }} />
       {/* Mobile Floating Book Button */}
       {selectedServices.length === 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 lg:hidden w-full px-6">
@@ -278,19 +322,22 @@ export default function SalonDetails() {
             <div className="space-y-4">
               {visibleServices.map((service: any) => {
                 const isSelected = selectedServices.some(s => s.id === service.id);
+                const displayVariant = getDisplayVariant(service);
                 return (
                 <div 
                   key={service.id}
                   onClick={() => {
+                    if (!user) {
+                      redirectToSignup();
+                      return;
+                    }
                     if (isSelected) {
                       setSelectedServices(prev => prev.filter(s => s.id !== service.id));
                     } else {
                       setSelectedServices(prev => [...prev, service]);
                     }
                     setSelectedTime('');
-                    // On mobile, scroll to staff selection
                     if (!isSelected && window.innerWidth < 1024) {
-                      // staff selection removed; scroll to booking widget
                       setTimeout(() => {
                         document.getElementById('booking-section')?.scrollIntoView({ behavior: 'smooth' });
                       }, 100);
@@ -305,19 +352,19 @@ export default function SalonDetails() {
                   <div>
                     <h3 className="font-bold text-stone-900 text-base md:text-lg">{service.name}</h3>
                     <p className="text-xs md:text-sm text-stone-500 mt-1">
-                      {!user
-                        ? 'Sign in for details'
-                        : getEffectiveVariant(service)?.duration
-                          ? `${getEffectiveVariant(service)?.duration} mins`
-                          : 'Duration depends on profile'}
+                      {displayVariant?.duration
+                        ? `${displayVariant.duration} mins`
+                        : user
+                          ? 'Duration depends on profile'
+                          : '—'}
                     </p>
                   </div>
                   <div className="font-bold text-stone-900 text-lg md:text-xl">
-                    {!user
-                      ? 'Sign in to see price'
-                      : getEffectiveVariant(service)?.price
-                        ? `₹${getEffectiveVariant(service)?.price}`
-                        : 'Profile based'}
+                    {displayVariant?.price
+                      ? `₹${displayVariant.price}`
+                      : user
+                        ? 'Profile based'
+                        : '—'}
                   </div>
                 </div>
               )})}
@@ -432,27 +479,7 @@ export default function SalonDetails() {
                   <label className="block text-sm font-bold text-stone-700 mb-4 flex items-center">
                     <Clock className="w-4 h-4 mr-2" /> Select Time
                   </label>
-                  {!user ? (
-                    <div className="text-center py-8 text-stone-600 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm px-4 space-y-3">
-                      <p>Sign in to see available time slots.</p>
-                      <div className="flex items-center justify-center gap-3">
-                        <button
-                          type="button"
-                          onClick={redirectToAuth}
-                          className="px-4 py-2 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors"
-                        >
-                          Sign in
-                        </button>
-                        <Link
-                          to="/register"
-                          state={{ from: salonPath }}
-                          className="px-4 py-2 rounded-xl border border-stone-300 text-stone-800 font-semibold hover:bg-white transition-colors"
-                        >
-                          Sign up
-                        </Link>
-                      </div>
-                    </div>
-                  ) : slotsLoading ? (
+                  {slotsLoading ? (
                     <div className="flex justify-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stone-900"></div>
                     </div>
@@ -484,19 +511,6 @@ export default function SalonDetails() {
 
                 {/* Summary */}
                 <div className="bg-gradient-to-b from-stone-50 to-white p-5 md:p-6 rounded-2xl border border-stone-200/60">
-                  {!user && (
-                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-                      Please{' '}
-                      <button type="button" onClick={redirectToAuth} className="font-semibold underline hover:text-amber-900">
-                        sign in
-                      </button>
-                      {' '}or{' '}
-                      <Link to="/register" state={{ from: salonPath }} className="font-semibold underline hover:text-amber-900">
-                        create an account
-                      </Link>
-                      {' '}to see pricing and book your appointment.
-                    </p>
-                  )}
                   {user && !user.gender && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
                       Please set your gender in profile to see final pricing and continue booking.
@@ -560,32 +574,20 @@ export default function SalonDetails() {
                 ) : (
                   <>
                     <button
-                      onClick={!user ? redirectToAuth : handleBook}
+                      onClick={handleBook}
                       disabled={
-                        !user
-                          ? bookingLoading
-                          : !selectedTime || bookingLoading || user.role !== 'CUSTOMER' || !user.gender
+                        !selectedTime || bookingLoading || user?.role !== 'CUSTOMER' || !user?.gender
                       }
                       className="w-full bg-stone-900 text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     >
                       {bookingLoading
                         ? 'Processing...'
-                        : !user
-                          ? 'Sign in to Book'
-                          : user.role !== 'CUSTOMER'
-                            ? 'Booking Restricted'
-                            : !user.gender
-                              ? 'Set Gender in Profile'
-                              : 'Book Appointment'}
+                        : user?.role !== 'CUSTOMER'
+                          ? 'Booking Restricted'
+                          : !user?.gender
+                            ? 'Set Gender in Profile'
+                            : 'Book Appointment'}
                     </button>
-                    {!user && (
-                      <p className="text-xs text-stone-500 text-center font-medium mt-2">
-                        New here?{' '}
-                        <Link to="/register" state={{ from: salonPath }} className="text-stone-900 font-semibold hover:underline">
-                          Create an account
-                        </Link>
-                      </p>
-                    )}
                     {user && user.role !== 'CUSTOMER' && (
                       <p className="text-xs text-red-500 text-center font-medium mt-2">
                         Only customer accounts can book services.

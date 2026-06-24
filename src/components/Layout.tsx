@@ -16,10 +16,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     navigate('/login');
   };
 
-  // Close menu on route change
+  // Close menu and reset scroll on route change
   useEffect(() => {
     setIsMenuOpen(false);
-  }, [location]);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col">

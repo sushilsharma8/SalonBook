@@ -154,18 +154,21 @@ export default function Home() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
-          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Active salons</p>
-          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.length}</p>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+        <div className="bg-white border border-stone-200/60 rounded-xl sm:rounded-2xl px-2.5 py-3 sm:px-5 sm:py-4 text-center sm:text-left">
+          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-stone-500 font-bold leading-tight">Active salons</p>
+          <p className="text-lg sm:text-2xl font-display font-bold text-stone-900 mt-0.5 sm:mt-1">{salons.length}</p>
         </div>
-        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
-          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Total services</p>
-          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.reduce((acc, salon) => acc + salon.serviceCount, 0)}</p>
+        <div className="bg-white border border-stone-200/60 rounded-xl sm:rounded-2xl px-2.5 py-3 sm:px-5 sm:py-4 text-center sm:text-left">
+          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-stone-500 font-bold leading-tight">Total services</p>
+          <p className="text-lg sm:text-2xl font-display font-bold text-stone-900 mt-0.5 sm:mt-1">{salons.reduce((acc, salon) => acc + salon.serviceCount, 0)}</p>
         </div>
-        <div className="bg-white border border-stone-200/60 rounded-2xl px-5 py-4">
-          <p className="text-xs uppercase tracking-wider text-stone-500 font-bold">Reviewed salons</p>
-          <p className="text-2xl font-display font-bold text-stone-900 mt-1">{salons.filter((s) => s.reviewCount > 0).length}</p>
+        <div className="bg-white border border-stone-200/60 rounded-xl sm:rounded-2xl px-2.5 py-3 sm:px-5 sm:py-4 text-center sm:text-left">
+          <p className="text-[10px] sm:text-xs uppercase tracking-wide text-stone-500 font-bold leading-tight">
+            <span className="sm:hidden">Reviewed</span>
+            <span className="hidden sm:inline">Reviewed salons</span>
+          </p>
+          <p className="text-lg sm:text-2xl font-display font-bold text-stone-900 mt-0.5 sm:mt-1">{salons.filter((s) => s.reviewCount > 0).length}</p>
         </div>
       </div>
 

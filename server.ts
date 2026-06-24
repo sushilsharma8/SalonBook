@@ -13,6 +13,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import ws from 'ws';
+import posthog from './src/lib/posthog-server.js';
 
 dotenv.config();
 
@@ -331,12 +332,14 @@ async function generateMenuExtraction(
   });
 }
 
+type MenuExtractionMeta = { model: string; inputTokens: number; outputTokens: number; latencyMs: number };
+
 async function extractServicesWithModelFallback(
   ai: GoogleGenAI,
   mimeType: string,
   base64Data: string,
 ): Promise<
-  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices>; model: string }
+  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices>; model: string; meta: MenuExtractionMeta }
   | { ok: false; status: number; error: string }
 > {
   const models = getGeminiMenuModelChain();
@@ -351,7 +354,9 @@ async function extractServicesWithModelFallback(
     const hasNextModel = index < models.length - 1;
 
     try {
+      const callStart = Date.now();
       const response = await generateMenuExtraction(ai, model, mimeType, base64Data);
+      const latencyMs = Date.now() - callStart;
       const rawText = response.text?.trim();
       if (!rawText) {
         lastError = {
@@ -399,7 +404,13 @@ async function extractServicesWithModelFallback(
         break;
       }
 
-      return { ok: true, services, model };
+      const meta: MenuExtractionMeta = {
+        model,
+        inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
+        outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+        latencyMs,
+      };
+      return { ok: true, services, model, meta };
     } catch (error) {
       const parsed = parseGeminiExtractionError(error);
       lastError = parsed;
@@ -425,7 +436,7 @@ async function extractServicesWithModelFallback(
 async function extractServicesFromMenuFile(
   file: Express.Multer.File,
 ): Promise<
-  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices> }
+  | { ok: true; services: ReturnType<typeof sanitizeExtractedServices>; meta: MenuExtractionMeta }
   | { ok: false; status: number; error: string }
 > {
   const ai = getGeminiClient();
@@ -451,7 +462,7 @@ async function extractServicesFromMenuFile(
       return { ok: false, status: result.status, error: result.error };
     }
 
-    return { ok: true, services: result.services };
+    return { ok: true, services: result.services, meta: result.meta };
   } catch (error: any) {
     console.error('Menu extraction failed:', error);
     const parsed = parseGeminiExtractionError(error);
@@ -1282,6 +1293,24 @@ export async function createApp() {
         },
       });
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
+      const anonId = req.headers['x-posthog-distinct-id'] as string | undefined;
+      posthog.identify({
+        distinctId: user.id,
+        properties: {
+          $set: { name: user.name, email: user.email, role: user.role, phone: user.phone },
+          $set_once: { created_at: user.createdAt?.toISOString() },
+          ...(anonId ? { $anon_distinct_id: anonId } : {}),
+        },
+      });
+      posthog.capture({
+        distinctId: user.id,
+        event: 'user_registered',
+        properties: {
+          role: user.role,
+          gender: user.gender,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       res.json({
         token,
         user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
@@ -1302,6 +1331,22 @@ export async function createApp() {
       if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
+      const anonId = req.headers['x-posthog-distinct-id'] as string | undefined;
+      posthog.identify({
+        distinctId: user.id,
+        properties: {
+          $set: { name: user.name, email: user.email, role: user.role, phone: user.phone },
+          ...(anonId ? { $anon_distinct_id: anonId } : {}),
+        },
+      });
+      posthog.capture({
+        distinctId: user.id,
+        event: 'user_logged_in',
+        properties: {
+          role: user.role,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       res.json({
         token,
         user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
@@ -1335,7 +1380,7 @@ export async function createApp() {
   };
 
   // Salons
-  let salonsListCache: { data: unknown[]; expiresAt: number } | null = null;
+  let salonsListCache: { data: unknown[]; expiresAt: number; cacheKey: string } | null = null;
   const SALONS_LIST_TTL_MS = 30_000;
   const invalidateSalonsListCache = () => {
     salonsListCache = null;
@@ -1356,10 +1401,11 @@ export async function createApp() {
           categories: true,
           openTime: true,
           closeTime: true,
+          featured: true,
           _count: { select: { services: true, reviews: true } },
           reviews: { select: { rating: true } },
         },
-        orderBy: { bookings: { _count: 'desc' } },
+        orderBy: [{ featured: 'desc' }, { bookings: { _count: 'desc' } }],
       });
 
       const salons = rows.map(({ reviews, _count, ...salon }) => {
@@ -1376,7 +1422,7 @@ export async function createApp() {
         };
       });
 
-      salonsListCache = { data: salons, expiresAt: Date.now() + SALONS_LIST_TTL_MS };
+      salonsListCache = { data: salons, expiresAt: Date.now() + SALONS_LIST_TTL_MS, cacheKey: 'all' };
       res.json(salons);
     } catch (error) {
       console.error(error);
@@ -1442,6 +1488,7 @@ export async function createApp() {
       const coords = await geocodeSalonAddress(address, name);
 
       let salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      const isNewSalon = !salon;
       const salonData = {
         name,
         address,
@@ -1471,6 +1518,15 @@ export async function createApp() {
       const salonWithHours = await prisma.salon.findUnique({
         where: { id: salon.id },
         include: { hours: { orderBy: { dayOfWeek: 'asc' } } },
+      });
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: isNewSalon ? 'salon_created' : 'salon_updated',
+        properties: {
+          salon_id: salon.id,
+          salon_name: name,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
       });
       invalidateSalonsListCache();
       res.json(salonWithHours);
@@ -1583,6 +1639,29 @@ export async function createApp() {
         res.status(result.status).json({ error: result.error });
         return;
       }
+      const traceId = crypto.randomUUID();
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: '$ai_generation',
+        properties: {
+          $ai_trace_id: traceId,
+          $ai_model: result.meta.model,
+          $ai_provider: 'google',
+          $ai_input_tokens: result.meta.inputTokens,
+          $ai_output_tokens: result.meta.outputTokens,
+          $ai_latency: result.meta.latencyMs / 1000,
+          $ai_span_name: 'menu_extraction',
+          $ai_is_error: false,
+        },
+      });
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'menu_scan_completed',
+        properties: {
+          services_found: result.services.length,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       res.json({ services: result.services });
     });
   });
@@ -1630,6 +1709,17 @@ export async function createApp() {
         });
       }
 
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'service_added',
+        properties: {
+          service_id: service.id,
+          service_name: service.name,
+          salon_id: salon.id,
+          variant_count: normalizedVariants.length,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       invalidateSalonsListCache();
       res.json(service);
     } catch (error: any) {
@@ -1697,6 +1787,15 @@ export async function createApp() {
 
       await deactivateSalonDefaultStaff(prisma, salon.id);
 
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'staff_added',
+        properties: {
+          staff_id: staff.id,
+          salon_id: salon.id,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       res.json(staff);
     } catch (error) {
       console.error('Failed to add staff:', error);
@@ -1712,6 +1811,15 @@ export async function createApp() {
       
       await prisma.service.deleteMany({
         where: { id: req.params.id, salonId: salon.id }
+      });
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'service_deleted',
+        properties: {
+          service_id: req.params.id,
+          salon_id: salon.id,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
       });
       invalidateSalonsListCache();
       res.json({ success: true });
@@ -1803,6 +1911,19 @@ export async function createApp() {
         startTime: time,
         duration: totalDuration,
         totalAmount: totalPrice
+      });
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'booking_created',
+        properties: {
+          booking_id: booking.id,
+          salon_id: salonId,
+          total_amount: totalPrice,
+          total_duration: totalDuration,
+          service_count: resolvedServices.length,
+          service_names: resolvedServices.map((s) => s.serviceName),
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
       });
       res.json(booking);
     } catch (error: any) {
@@ -1911,6 +2032,16 @@ export async function createApp() {
         return { updatedBooking, accountDeactivated: false, noShowCount };
       });
 
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'booking_status_updated',
+        properties: {
+          booking_id: req.params.id,
+          new_status: status,
+          salon_id: booking.salonId,
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
+      });
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: 'Failed to update booking' });
@@ -1942,6 +2073,16 @@ export async function createApp() {
           rating: parseInt(rating),
           comment
         }
+      });
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: 'review_submitted',
+        properties: {
+          salon_id: salonId,
+          rating: parseInt(rating),
+          has_comment: Boolean(comment),
+          $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+        },
       });
       invalidateSalonsListCache();
       res.json(review);
@@ -2216,6 +2357,21 @@ export async function createApp() {
         res.status(result.status).json({ error: result.error });
         return;
       }
+      const traceId = crypto.randomUUID();
+      posthog.capture({
+        distinctId: req.user.userId,
+        event: '$ai_generation',
+        properties: {
+          $ai_trace_id: traceId,
+          $ai_model: result.meta.model,
+          $ai_provider: 'google',
+          $ai_input_tokens: result.meta.inputTokens,
+          $ai_output_tokens: result.meta.outputTokens,
+          $ai_latency: result.meta.latencyMs / 1000,
+          $ai_span_name: 'menu_extraction',
+          $ai_is_error: false,
+        },
+      });
       res.json({ services: result.services });
     });
   });
@@ -2406,6 +2562,17 @@ export async function createApp() {
         where: { id: booking.id },
         data: { status: action },
       });
+      if (action === 'CONFIRMED') {
+        posthog.capture({
+          distinctId: req.user.userId,
+          event: 'booking_confirmed_by_seller',
+          properties: {
+            booking_id: booking.id,
+            salon_id: booking.salonId,
+            $session_id: req.headers['x-posthog-session-id'] as string | undefined,
+          },
+        });
+      }
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: 'Failed to update booking' });
@@ -2415,6 +2582,200 @@ export async function createApp() {
   // Health
   app.get('/api/health', (req: Request, res: Response) => {
     res.json({ status: 'ok' });
+  });
+
+  app.get('/api/public/stats', async (_req: Request, res: Response) => {
+    try {
+      const salons = await prisma.salon.findMany({
+        select: {
+          address: true,
+          _count: { select: { services: true, reviews: true } },
+        },
+      });
+      const cityKeywords = [
+        'delhi', 'mumbai', 'bangalore', 'bengaluru', 'hyderabad', 'pune', 'chennai',
+        'kolkata', 'gurgaon', 'gurugram', 'noida', 'chandigarh', 'mohali', 'ahmedabad',
+      ];
+      const cities = new Set<string>();
+      for (const salon of salons) {
+        const lower = salon.address.toLowerCase();
+        for (const city of cityKeywords) {
+          if (lower.includes(city)) {
+            cities.add(city);
+            break;
+          }
+        }
+      }
+      res.json({
+        salons: salons.length,
+        services: salons.reduce((acc, s) => acc + s._count.services, 0),
+        reviews: salons.reduce((acc, s) => acc + s._count.reviews, 0),
+        cities: cities.size,
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+  });
+
+  app.get('/api/public/testimonials', async (_req: Request, res: Response) => {
+    try {
+      const reviews = await prisma.review.findMany({
+        where: { comment: { not: null } },
+        include: {
+          user: { select: { name: true, role: true } },
+          salon: { select: { name: true, address: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+      });
+      const testimonials = reviews
+        .filter((r) => r.comment && r.comment.trim().length > 10)
+        .map((r) => {
+          const firstName = r.user.name.split(' ')[0];
+          const roleLabel =
+            r.user.role === 'SELLER'
+              ? `Salon owner`
+              : `Customer`;
+          const cityMatch = r.salon.address.match(/(Delhi|Gurgaon|Gurugram|Noida|Mumbai|Bangalore|Hyderabad|Pune)/i);
+          const location = cityMatch ? cityMatch[1] : 'India';
+          return {
+            name: firstName,
+            role: `${roleLabel}, ${location}`,
+            quote: r.comment!.trim(),
+            rating: r.rating,
+          };
+        });
+      res.json(testimonials);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to fetch testimonials' });
+    }
+  });
+
+  app.get('/api/admin/marketing', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const salons = await prisma.salon.findMany({
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          featured: true,
+          images: true,
+          createdAt: true,
+          _count: { select: { services: true, staff: true, bookings: true } },
+          bookings: {
+            where: { createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+            select: { id: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      const enriched = salons.map((s) => {
+        let photoCount = 0;
+        if (s.images) {
+          try {
+            const parsed = JSON.parse(s.images);
+            photoCount = Array.isArray(parsed) ? parsed.length : 0;
+          } catch {
+            photoCount = 0;
+          }
+        }
+        const profileComplete = photoCount >= 3 && s._count.services >= 8 && s._count.staff >= 1;
+        return {
+          id: s.id,
+          name: s.name,
+          address: s.address,
+          featured: s.featured,
+          photoCount,
+          serviceCount: s._count.services,
+          staffCount: s._count.staff,
+          bookingsThisWeek: s.bookings.length,
+          totalBookings: s._count.bookings,
+          profileComplete,
+        };
+      });
+      res.json({
+        summary: {
+          totalSalons: enriched.length,
+          completeProfiles: enriched.filter((s) => s.profileComplete).length,
+          featuredSalons: enriched.filter((s) => s.featured).length,
+          bookingsThisWeek: enriched.reduce((acc, s) => acc + s.bookingsThisWeek, 0),
+        },
+        salons: enriched,
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to fetch marketing data' });
+    }
+  });
+
+  app.patch('/api/admin/salons/:id/featured', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const { featured } = req.body;
+      if (typeof featured !== 'boolean') {
+        return res.status(400).json({ error: 'featured must be a boolean' });
+      }
+      const salon = await prisma.salon.update({
+        where: { id: req.params.id },
+        data: { featured },
+      });
+      invalidateSalonsListCache();
+      res.json(salon);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update featured status' });
+    }
+  });
+
+  app.get('/robots.txt', (_req: Request, res: Response) => {
+    const baseUrl = process.env.APP_URL || 'https://salonbook.app';
+    res.type('text/plain').send(`User-agent: *
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin/
+Disallow: /booking/action/
+
+Sitemap: ${baseUrl}/sitemap.xml
+`);
+  });
+
+  app.get('/sitemap.xml', async (_req: Request, res: Response) => {
+    try {
+      const baseUrl = process.env.APP_URL || 'https://salonbook.app';
+      const salons = await prisma.salon.findMany({ select: { id: true, createdAt: true } });
+      const staticPages = ['', 'explore', 'register', 'login', 'contact', 'terms', 'privacy'];
+      const urls = [
+        ...staticPages.map((p) => ({
+          loc: p ? `${baseUrl}/${p}` : baseUrl,
+          lastmod: new Date().toISOString().split('T')[0],
+        })),
+        ...salons.map((s) => ({
+          loc: `${baseUrl}/salon/${s.id}`,
+          lastmod: s.createdAt.toISOString().split('T')[0],
+        })),
+      ];
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((u) => `  <url><loc>${u.loc}</loc><lastmod>${u.lastmod}</lastmod></url>`).join('\n')}
+</urlset>`;
+      res.type('application/xml').send(xml);
+    } catch (error) {
+      console.error(error);
+      res.status(500).send('Error generating sitemap');
+    }
+  });
+
+  // --- Error Handler ---
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const distinctId = (req as any).user?.userId as string | undefined;
+    posthog.captureException(err, distinctId, {
+      method: req.method,
+      path: req.path,
+    });
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
   });
 
   // --- Vite Middleware ---

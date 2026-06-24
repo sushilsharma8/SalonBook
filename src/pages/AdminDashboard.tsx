@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw, KeyRound } from 'lucide-react';
+import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw, KeyRound, Megaphone, Star } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Link } from 'react-router-dom';
 
@@ -11,7 +11,8 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [salons, setSalons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'salons'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'salons' | 'marketing'>('dashboard');
+  const [marketing, setMarketing] = useState<{ summary: any; salons: any[] } | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [resetUser, setResetUser] = useState<{ id: string; name: string } | null>(null);
@@ -42,6 +43,44 @@ export default function AdminDashboard() {
       setLoading(false);
     });
   }, [token]);
+
+  useEffect(() => {
+    if (activeTab !== 'marketing' || !token) return;
+    fetch('/api/admin/marketing', { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.error) setMarketing(data);
+      })
+      .catch(console.error);
+  }, [activeTab, token]);
+
+  const handleToggleFeatured = async (id: string, featured: boolean) => {
+    try {
+      const res = await fetch(`/api/admin/salons/${id}/featured`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ featured }),
+      });
+      if (res.ok && marketing) {
+        setMarketing({
+          ...marketing,
+          salons: marketing.salons.map((s) => (s.id === id ? { ...s, featured } : s)),
+          summary: {
+            ...marketing.summary,
+            featuredSalons: featured
+              ? marketing.summary.featuredSalons + 1
+              : marketing.summary.featuredSalons - 1,
+          },
+        });
+        flash('success', featured ? 'Salon featured on explore' : 'Featured removed');
+      }
+    } catch {
+      flash('error', 'Failed to update featured status');
+    }
+  };
 
   const handleDeleteUser = async (id: string) => {
     if (!confirm('Are you sure you want to delete this user?')) return;
@@ -229,6 +268,12 @@ export default function AdminDashboard() {
             className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'salons' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
           >
             Salons
+          </button>
+          <button 
+            onClick={() => setActiveTab('marketing')}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'marketing' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
+          >
+            Marketing
           </button>
         </div>
       </div>
@@ -486,6 +531,83 @@ export default function AdminDashboard() {
               </div>
             ))}
             {salons.length === 0 && <p className="py-8 text-center text-stone-500 text-sm">No salons found.</p>}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'marketing' && (
+        <div className="space-y-8 animate-in fade-in duration-500">
+          <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60">
+            <h2 className="text-2xl font-bold text-stone-900 mb-2 font-display tracking-tight flex items-center">
+              <Megaphone className="w-6 h-6 mr-3 text-stone-400" /> Marketing overview
+            </h2>
+            <p className="text-stone-500 text-sm mb-8">Supply health overview — featured salons appear first on Explore.</p>
+            {marketing ? (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                  <div className="bg-stone-50 rounded-2xl p-5 border border-stone-100">
+                    <p className="text-xs uppercase tracking-wider text-stone-400 font-bold mb-1">Total salons</p>
+                    <p className="text-2xl font-bold text-stone-900">{marketing.summary.totalSalons}</p>
+                  </div>
+                  <div className="bg-stone-50 rounded-2xl p-5 border border-stone-100">
+                    <p className="text-xs uppercase tracking-wider text-stone-400 font-bold mb-1">Complete profiles</p>
+                    <p className="text-2xl font-bold text-stone-900">{marketing.summary.completeProfiles}</p>
+                  </div>
+                  <div className="bg-stone-50 rounded-2xl p-5 border border-stone-100">
+                    <p className="text-xs uppercase tracking-wider text-stone-400 font-bold mb-1">Featured</p>
+                    <p className="text-2xl font-bold text-stone-900">{marketing.summary.featuredSalons}</p>
+                  </div>
+                  <div className="bg-stone-50 rounded-2xl p-5 border border-stone-100">
+                    <p className="text-xs uppercase tracking-wider text-stone-400 font-bold mb-1">Bookings (7d)</p>
+                    <p className="text-2xl font-bold text-stone-900">{marketing.summary.bookingsThisWeek}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-stone-200 text-stone-500 uppercase tracking-wider">
+                        <th className="pb-3 font-bold">Salon</th>
+                        <th className="pb-3 font-bold">Profile</th>
+                        <th className="pb-3 font-bold">Bookings (7d)</th>
+                        <th className="pb-3 font-bold text-right">Featured</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {marketing.salons.map((s) => (
+                        <tr key={s.id} className="border-b border-stone-100 last:border-0">
+                          <td className="py-3">
+                            <div className="font-medium text-stone-900">{s.name}</div>
+                            <div className="text-xs text-stone-400 truncate max-w-[200px]">{s.address}</div>
+                          </td>
+                          <td className="py-3">
+                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                              s.profileComplete ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {s.photoCount} photos · {s.serviceCount} svc
+                            </span>
+                          </td>
+                          <td className="py-3">{s.bookingsThisWeek}</td>
+                          <td className="py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleFeatured(s.id, !s.featured)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                s.featured ? 'text-amber-600 bg-amber-50' : 'text-stone-400 hover:bg-stone-100'
+                              }`}
+                              title={s.featured ? 'Remove featured' : 'Feature salon'}
+                            >
+                              <Star className={`w-5 h-5 ${s.featured ? 'fill-amber-500' : ''}`} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <p className="text-stone-500 py-8 text-center">Loading marketing data...</p>
+            )}
           </div>
         </div>
       )}

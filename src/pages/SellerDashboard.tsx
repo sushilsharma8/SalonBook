@@ -7,6 +7,7 @@ import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkl
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
 import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
 import { SalonQRCard } from '../components/SalonQRCard';
+import { SellerOnboardingChecklist, SellerMarketingKit } from '../components/seller/SellerMarketingTools';
 
 const CATEGORIES = [
   { id: 'hair', label: 'Hair salon', icon: Scissors },
@@ -558,7 +559,11 @@ export default function SellerDashboard() {
       )}
 
       {salon && !showSalonForm && (
-        <SalonQRCard salonId={salon.id} salonName={salon.name} />
+        <>
+          <SellerOnboardingChecklist salon={salon} />
+          <SalonQRCard salonId={salon.id} salonName={salon.name} salonImages={salon.images} />
+          <SellerMarketingKit />
+        </>
       )}
 
       {showSalonForm && (

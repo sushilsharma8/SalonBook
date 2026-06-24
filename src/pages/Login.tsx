@@ -3,6 +3,7 @@ import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { ShieldCheck, Sparkles, Scissors } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { identifyUser, getPostHogHeaders } from '../lib/analytics';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -21,13 +22,14 @@ export default function Login() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getPostHogHeaders() },
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      
+
       login(data.user, data.token);
+      identifyUser(data.user.id, { name: data.user.name, email: data.user.email, role: data.user.role });
       if (redirectTo) {
         navigate(redirectTo);
       } else {

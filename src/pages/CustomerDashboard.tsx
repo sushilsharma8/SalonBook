@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { bookingTimeMs, formatBookingTime, isBookingUpcoming, nowBookingTimeMs } from '../lib/bookingTime';
 import { buildGoogleMapsDirectionsUrl } from '../lib/maps';
-import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check } from 'lucide-react';
+import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check, Share2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { buildSalonUrl } from '../lib/utm';
+import { trackEvent } from '../lib/analytics';
 
 /** Title-case words for display (fixes all-lowercase copy from seed/API). */
 function toTitleCase(value: string | undefined | null): string {
@@ -70,6 +72,21 @@ export default function CustomerDashboard() {
         setLoading(false);
       });
   }, [token]);
+
+  const shareBooking = (booking: any) => {
+    const salonUrl = buildSalonUrl(booking.salon.id, {
+      utm_source: 'customer_share',
+      utm_medium: 'whatsapp',
+      utm_campaign: booking.salon.id,
+    });
+    const text =
+      `I booked at ${toTitleCase(booking.salon.name)} on SalonBook — ` +
+      `${formatBookingTime(booking.startTime, 'MMM d')} at ${formatBookingTime(booking.startTime, 'h:mm a')}. ` +
+      `Book your visit too:`;
+    trackEvent('booking_share', { salon_id: booking.salon.id, booking_id: booking.id });
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`${text}\n${salonUrl}`)}`;
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+  };
 
   const handleCancel = async (id: string) => {
     if (!confirm('Are you sure you want to cancel this booking?')) return;
@@ -392,6 +409,15 @@ export default function CustomerDashboard() {
                     </div>
                     
                     <div className="flex flex-wrap md:flex-col gap-2 justify-end">
+                      {isUpcoming && (booking.status === 'CONFIRMED' || booking.status === 'PENDING') && (
+                        <button
+                          type="button"
+                          onClick={() => shareBooking(booking)}
+                          className="text-stone-700 bg-stone-100 hover:bg-stone-200 px-3 md:px-5 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-semibold transition-colors flex items-center justify-center border border-stone-200"
+                        >
+                          <Share2 className="w-3.5 h-3.5 md:w-4 md:h-4 mr-1 md:mr-1.5" /> Share
+                        </button>
+                      )}
                       {isUpcoming && booking.salon.owner?.phone && (
                         <a 
                           href={`https://wa.me/${booking.salon.owner.phone.replace(/\D/g, '').length === 10 ? '91' + booking.salon.owner.phone.replace(/\D/g, '') : booking.salon.owner.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello ${toTitleCase(booking.salon.owner.name)}, I have an upcoming appointment at ${toTitleCase(booking.salon.name)} for ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')}.`)}`}

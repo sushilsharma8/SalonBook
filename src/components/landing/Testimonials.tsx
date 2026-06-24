@@ -1,41 +1,32 @@
+import { useEffect, useState } from 'react';
 import { Star } from 'lucide-react';
 import { Marquee } from './Marquee';
 import { Reveal } from './Reveal';
 
-const testimonials = [
+const FALLBACK_TESTIMONIALS = [
   {
-    name: 'Priya Sharma',
+    name: 'Priya',
     role: 'Customer, Mumbai',
-    quote: 'Booked a haircut in 30 seconds. No more calling salons and waiting on hold. SalonBook is a game changer.',
+    quote: 'Booked a haircut in under a minute. No more calling salons and waiting on hold.',
     rating: 5,
   },
   {
-    name: 'Rahul Mehta',
-    role: 'Salon Owner, Bangalore',
-    quote: 'My bookings went up 40% after listing on SalonBook. The dashboard makes managing appointments effortless.',
+    name: 'Rahul',
+    role: 'Salon owner, Bangalore',
+    quote: 'Setting up my salon profile took 10 minutes. Customers find me and book directly now.',
     rating: 5,
   },
   {
-    name: 'Ananya Reddy',
-    role: 'Customer, Hyderabad',
-    quote: 'Love seeing real reviews and live slot availability. I always know exactly when I can get in.',
-    rating: 5,
-  },
-  {
-    name: 'Vikram Singh',
-    role: 'Customer, Delhi',
+    name: 'Vikram',
+    role: 'Customer, India',
     quote: 'Finally a booking app that understands Indian salons. Pay at shop, no forced online payments.',
-    rating: 5,
-  },
-  {
-    name: 'Sneha Patel',
-    role: 'Salon Owner, Pune',
-    quote: 'Setting up my salon profile took 10 minutes. Now customers find me and book directly.',
     rating: 5,
   },
 ];
 
-function TestimonialCard({ item }: { item: (typeof testimonials)[0] }) {
+type Testimonial = (typeof FALLBACK_TESTIMONIALS)[0];
+
+function TestimonialCard({ item }: { item: Testimonial }) {
   return (
     <div className="w-[340px] shrink-0 bg-white rounded-[1.5rem] border border-stone-200/60 p-6 md:p-8 shadow-sm">
       <div className="flex gap-1 mb-4">
@@ -53,6 +44,23 @@ function TestimonialCard({ item }: { item: (typeof testimonials)[0] }) {
 }
 
 export default function Testimonials() {
+  const [testimonials, setTestimonials] = useState<Testimonial[]>(FALLBACK_TESTIMONIALS);
+
+  useEffect(() => {
+    fetch('/api/public/testimonials')
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        return data as Testimonial[];
+      })
+      .then((data) => {
+        if (data.length >= 3) setTestimonials(data);
+      })
+      .catch(() => {
+        /* keep fallback */
+      });
+  }, []);
+
   return (
     <section className="py-20 md:py-28 bg-white overflow-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12">
@@ -62,14 +70,14 @@ export default function Testimonials() {
             Loved by customers & salon owners
           </h2>
           <p className="text-stone-500 text-lg">
-            See why people across India trust SalonBook for their beauty and wellness bookings.
+            Real reviews from verified visits on SalonBook.
           </p>
         </Reveal>
       </div>
 
       <Marquee speed={50}>
-        {testimonials.map((item) => (
-          <TestimonialCard key={item.name} item={item} />
+        {testimonials.map((item, i) => (
+          <TestimonialCard key={`${item.name}-${i}`} item={item} />
         ))}
       </Marquee>
     </section>
