@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard } from 'lucide-react';
+import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard, X } from 'lucide-react';
 import { format, addDays, startOfToday, isSameDay } from 'date-fns';
 import { buildBookingIso } from '../lib/bookingTime';
 import { isSalonOpenOnDate, normalizeWeeklyHoursFromApi } from '../lib/salonHours';
@@ -31,6 +31,7 @@ export default function SalonDetails() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [showBookingConfirm, setShowBookingConfirm] = useState(false);
 
   const getEffectiveVariant = (service: any) => {
     const variants = service.variants || [];
@@ -141,7 +142,6 @@ export default function SalonDetails() {
     try {
       const bookingTimeStr = buildBookingIso(selectedDate, selectedTime);
 
-      // 1. Create Booking
       const res = await fetch('/api/bookings', {
         method: 'POST',
         headers: {
@@ -164,6 +164,7 @@ export default function SalonDetails() {
         booking_id: bookingData.id,
         ...getStoredUtm(),
       });
+      setShowBookingConfirm(false);
       setSuccessMessage('Booking successful! You can pay at the shop directly.');
 
       if (salon.owner?.phone && bookingData.actionToken) {
@@ -183,6 +184,20 @@ export default function SalonDetails() {
     } finally {
       setBookingLoading(false);
     }
+  };
+
+  const requestBooking = () => {
+    setErrorMessage(null);
+    if (!user) {
+      redirectToSignup();
+      return;
+    }
+    if (user.role !== 'CUSTOMER') {
+      setErrorMessage('Only customers can book services. Please log in with a customer account.');
+      return;
+    }
+    if (!selectedServices.length || !selectedTime) return;
+    setShowBookingConfirm(true);
   };
 
   const filteredTimeSlots = timeSlots.filter(slot => {
@@ -223,6 +238,9 @@ export default function SalonDetails() {
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
   if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
+
+  const bookingTotal = selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.price ?? 0), 0);
+  const bookingDuration = selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.duration ?? 0), 0);
 
   const localBusinessSchema = {
     '@context': 'https://schema.org',
@@ -528,12 +546,12 @@ export default function SalonDetails() {
                   </div>
                   <div className="flex justify-between text-xs md:text-sm text-stone-500 mb-4 md:mb-6 pb-4 md:pb-6 border-b border-stone-200">
                     <span>With assigned professional</span>
-                    <span>{selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.duration ?? 0), 0)} min</span>
+                    <span>{bookingDuration} min</span>
                   </div>
                   <div className="flex justify-between items-center mb-2">
                     <span className="font-bold text-stone-900">Total to pay</span>
                     <span className="text-xl md:text-3xl font-bold text-stone-900 font-display">
-                      ₹{selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.price ?? 0), 0)}
+                      ₹{bookingTotal}
                     </span>
                   </div>
                   <p className="text-[10px] md:text-xs text-stone-500 flex items-center">
@@ -574,7 +592,7 @@ export default function SalonDetails() {
                 ) : (
                   <>
                     <button
-                      onClick={handleBook}
+                      onClick={requestBooking}
                       disabled={
                         !selectedTime || bookingLoading || user?.role !== 'CUSTOMER' || !user?.gender
                       }
@@ -600,6 +618,78 @@ export default function SalonDetails() {
           </div>
         </div>
       </div>
+
+      {showBookingConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/40 backdrop-blur-sm">
+          <div className="bg-white rounded-[2rem] w-full max-w-md p-6 md:p-8 shadow-xl relative animate-in fade-in zoom-in-95 duration-200">
+            <button
+              type="button"
+              onClick={() => !bookingLoading && setShowBookingConfirm(false)}
+              disabled={bookingLoading}
+              className="absolute top-5 right-5 text-stone-400 hover:text-stone-900 transition-colors disabled:opacity-50"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <h3 className="text-xl md:text-2xl font-bold text-stone-900 font-display mb-2 pr-8">
+              Confirm your appointment
+            </h3>
+            <p className="text-stone-500 text-sm mb-6">
+              Please review the details below before booking.
+            </p>
+
+            <div className="space-y-4 mb-6">
+              <div className="bg-stone-50 rounded-2xl border border-stone-200 p-4 space-y-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-stone-500 mb-1">Salon</p>
+                  <p className="font-semibold text-stone-900">{salon.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-stone-500 mb-1">Date & time</p>
+                  <p className="font-semibold text-stone-900">
+                    {format(selectedDate, 'EEEE, MMM d, yyyy')} at {selectedTime}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-stone-500 mb-1">Services</p>
+                  <ul className="space-y-1">
+                    {selectedServices.map((service) => (
+                      <li key={service.id} className="flex justify-between text-sm">
+                        <span className="text-stone-700">{service.name}</span>
+                        <span className="font-semibold text-stone-900">₹{getEffectiveVariant(service)?.price ?? 0}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex justify-between items-center pt-3 border-t border-stone-200">
+                  <span className="font-bold text-stone-900">Total</span>
+                  <span className="text-xl font-bold text-stone-900 font-display">₹{bookingTotal}</span>
+                </div>
+                <p className="text-xs text-stone-500">Duration: {bookingDuration} min · Pay at shop directly</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setShowBookingConfirm(false)}
+                disabled={bookingLoading}
+                className="py-3.5 rounded-2xl font-bold border border-stone-300 text-stone-800 hover:bg-stone-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBook}
+                disabled={bookingLoading}
+                className="py-3.5 rounded-2xl font-bold bg-stone-900 text-white hover:bg-stone-800 transition-colors disabled:opacity-50"
+              >
+                {bookingLoading ? 'Booking...' : 'Yes, book it'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
