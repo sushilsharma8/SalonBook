@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Star, MapPin, Clock, Search, ArrowRight } from 'lucide-react';
+import { Star, MapPin, Clock, Search, ArrowRight, AlertTriangle, Circle } from 'lucide-react';
 import { CATEGORIES } from '../lib/categories';
+import { isSalonOpenNow, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
 
 interface Salon {
   id: string;
@@ -11,6 +12,7 @@ interface Salon {
   categories: string | null;
   openTime: string;
   closeTime: string;
+  hours?: SalonDayHours[];
   serviceCount: number;
   reviewCount: number;
   avgRating: number | null;
@@ -21,6 +23,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
@@ -31,6 +34,7 @@ export default function Home() {
   }, [searchParams]);
 
   useEffect(() => {
+    setFetchError(null);
     fetch('/api/salons')
       .then(async res => {
         const data = await res.json();
@@ -43,6 +47,7 @@ export default function Home() {
       })
       .catch(err => {
         console.error(err);
+        setFetchError(err instanceof Error ? err.message : 'Failed to load salons');
         setLoading(false);
       });
   }, []);
@@ -82,15 +87,21 @@ export default function Home() {
     );
   }
 
-  const isSalonOpenNow = (openTime: string, closeTime: string) => {
-    const now = new Date();
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-    const [oh, om] = openTime.split(':').map(Number);
-    const [ch, cm] = closeTime.split(':').map(Number);
-    const start = oh * 60 + om;
-    const end = ch * 60 + cm;
-    return currentMins >= start && currentMins <= end;
-  };
+  if (fetchError) {
+    return (
+      <div className="text-center py-20 bg-white rounded-[2rem] border border-red-100 shadow-sm">
+        <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+        <p className="text-xl font-medium text-stone-900 mb-2">Could not load salons</p>
+        <p className="text-stone-500 mb-6">{fetchError}</p>
+        <button
+          onClick={() => { setLoading(true); window.location.reload(); }}
+          className="px-6 py-2.5 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-12">
@@ -190,7 +201,9 @@ export default function Home() {
               /* use fallback image */
             }
           }
-          const avgRating = salon.avgRating != null ? salon.avgRating.toFixed(1) : 'New';
+          const hasRating = salon.avgRating != null;
+          const weeklyHours = normalizeWeeklyHoursFromApi(salon.hours, salon.openTime, salon.closeTime);
+          const openNow = isSalonOpenNow(weeklyHours, salon.openTime, salon.closeTime);
 
           return (
             <Link 
@@ -205,17 +218,34 @@ export default function Home() {
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-bold flex items-center space-x-1 shadow-sm text-stone-900">
-                  <Star className="w-4 h-4 text-stone-900 fill-current" />
-                  <span>{avgRating}</span>
+                <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/40 via-black/10 to-transparent pointer-events-none" />
+
+                <div
+                  className={`absolute top-3 left-3 inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide backdrop-blur-md shadow-sm border ${
+                    openNow
+                      ? 'bg-emerald-950/55 text-emerald-50 border-emerald-400/30'
+                      : 'bg-stone-950/55 text-stone-100 border-stone-400/25'
+                  }`}
+                >
+                  <Circle
+                    className={`w-2 h-2 shrink-0 fill-current ${
+                      openNow ? 'text-emerald-400' : 'text-stone-400'
+                    }`}
+                  />
+                  {openNow ? 'Open now' : 'Closed'}
                 </div>
-                <div className={`absolute top-4 left-4 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border ${
-                  isSalonOpenNow(salon.openTime, salon.closeTime)
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-red-50 text-red-700 border-red-200'
-                }`}>
-                  {isSalonOpenNow(salon.openTime, salon.closeTime) ? 'Open now' : 'Closed'}
-                </div>
+
+                {hasRating ? (
+                  <div className="absolute top-3 right-3 inline-flex items-center gap-1 pl-2 pr-2.5 py-1 rounded-full text-xs font-bold backdrop-blur-md shadow-sm border bg-white/95 text-stone-900 border-white/60">
+                    <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+                    <span>{salon.avgRating!.toFixed(1)}</span>
+                  </div>
+                ) : (
+                  <div className="absolute top-3 right-3 inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide backdrop-blur-md shadow-sm border bg-white/92 text-stone-700 border-white/50">
+                    <Circle className="w-2 h-2 shrink-0 fill-violet-400 text-violet-400" />
+                    New
+                  </div>
+                )}
               </div>
               
               <div className="p-6 flex-1 flex flex-col">

@@ -1,4 +1,4 @@
-import { type ChangeEvent, type ComponentType, type FormEvent } from 'react';
+import { type ChangeEvent, type ComponentType, type FormEvent, useState } from 'react';
 import { WEEKDAYS, type SalonDayHours } from '../../lib/salonHours';
 
 type Category = {
@@ -24,6 +24,28 @@ type ServiceData = {
   name: string;
   variants: ServiceVariant[];
 };
+
+export function getGenderVariantStyles(targetGender: string) {
+  if (targetGender === 'MALE') {
+    return {
+      row: 'rounded-xl border border-blue-100 bg-blue-50/60 p-2',
+      label: 'bg-blue-100 text-blue-800 border-blue-200',
+      input: 'border-blue-200 bg-white focus:ring-blue-400 focus:border-blue-300',
+    };
+  }
+  if (targetGender === 'FEMALE') {
+    return {
+      row: 'rounded-xl border border-pink-100 bg-pink-50/60 p-2',
+      label: 'bg-pink-100 text-pink-800 border-pink-200',
+      input: 'border-pink-200 bg-white focus:ring-pink-400 focus:border-pink-300',
+    };
+  }
+  return {
+    row: 'rounded-xl border border-stone-200 bg-stone-50/60 p-2',
+    label: 'bg-stone-100 text-stone-700 border-stone-200',
+    input: 'border-stone-200 bg-white focus:ring-stone-900',
+  };
+}
 
 export type ImportedServiceDraft = {
   name: string;
@@ -60,9 +82,11 @@ interface SellerSalonFormProps {
 interface SellerServiceFormProps {
   serviceData: ServiceData;
   serviceError: string;
+  submitLabel?: string;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   onNameChange: (value: string) => void;
   onVariantChange: (index: number, field: 'price' | 'duration', value: string) => void;
+  onCancel?: () => void;
 }
 
 interface SellerStaffFormProps {
@@ -318,43 +342,224 @@ export function SellerSalonForm({
 export function SellerServiceForm({
   serviceData,
   serviceError,
+  submitLabel = 'Add Service',
   onSubmit,
   onNameChange,
   onVariantChange,
+  onCancel,
 }: SellerServiceFormProps) {
   return (
     <form onSubmit={onSubmit} className="mb-8 space-y-4 bg-stone-50 p-6 rounded-2xl border border-stone-200/60">
       <input type="text" placeholder="Service Name" required className="w-full px-5 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white" value={serviceData.name} onChange={(e) => onNameChange(e.target.value)} />
       <div className="space-y-3">
-        {serviceData.variants.map((variant, index) => (
-          <div key={variant.targetGender} className="grid grid-cols-3 gap-3 items-center">
-            <div className="text-xs font-bold text-stone-500 bg-white border border-stone-200 rounded-xl px-3 py-3 text-center">
+        {serviceData.variants.map((variant, index) => {
+          const styles = getGenderVariantStyles(variant.targetGender);
+          return (
+          <div key={variant.targetGender} className={`grid grid-cols-3 gap-3 items-center ${styles.row}`}>
+            <div className={`text-xs font-bold border rounded-xl px-3 py-3 text-center ${styles.label}`}>
               {variant.targetGender}
             </div>
             <input
               type="number"
               placeholder="Price (Rs)"
-              className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+              className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 ${styles.input}`}
               value={variant.price}
               onChange={(e) => onVariantChange(index, 'price', e.target.value)}
             />
             <input
               type="number"
               placeholder="Duration (min)"
-              className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+              className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 ${styles.input}`}
               value={variant.duration}
               onChange={(e) => onVariantChange(index, 'duration', e.target.value)}
             />
           </div>
-        ))}
+          );
+        })}
       </div>
       {serviceError && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
           {serviceError}
         </div>
       )}
-      <button type="submit" className="w-full bg-stone-900 text-white py-3.5 rounded-xl font-bold hover:bg-stone-800 transition-colors mt-2">Add Service</button>
+      <div className={`flex gap-2 mt-2 ${onCancel ? '' : ''}`}>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="flex-1 bg-white text-stone-700 py-3.5 rounded-xl font-bold hover:bg-stone-100 transition-colors border border-stone-200">
+            Cancel
+          </button>
+        )}
+        <button type="submit" className={`${onCancel ? 'flex-1' : 'w-full'} bg-stone-900 text-white py-3.5 rounded-xl font-bold hover:bg-stone-800 transition-colors`}>
+          {submitLabel}
+        </button>
+      </div>
     </form>
+  );
+}
+
+type StaffTimeOffEntry = {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+};
+
+interface StaffTimeOffPanelProps {
+  staffId: string;
+  salonOpenTime: string;
+  salonCloseTime: string;
+  timeOff: StaffTimeOffEntry[];
+  token: string;
+  onUpdated: () => void;
+}
+
+export function StaffTimeOffPanel({
+  staffId,
+  salonOpenTime,
+  salonCloseTime,
+  timeOff,
+  token,
+  onUpdated,
+}: StaffTimeOffPanelProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [date, setDate] = useState('');
+  const [startTime, setStartTime] = useState(salonOpenTime);
+  const [endTime, setEndTime] = useState(salonCloseTime);
+  const [allDay, setAllDay] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleAdd = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!date) {
+      setError('Pick a date for time off.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/seller/staff/${staffId}/time-off`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ date, startTime, endTime, allDay }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to add time off');
+      setDate('');
+      setAllDay(true);
+      onUpdated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add time off');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (timeOffId: string) => {
+    try {
+      const res = await fetch(`/api/seller/staff/${staffId}/time-off/${timeOffId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) onUpdated();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const formatOffDate = (value: string) => {
+    const d = new Date(value);
+    return d.toLocaleDateString('en-IN', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-stone-100">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="text-sm font-bold text-stone-600 hover:text-stone-900 transition-colors"
+      >
+        {expanded ? 'Hide time off' : `Manage time off${timeOff.length ? ` (${timeOff.length})` : ''}`}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {timeOff.length === 0 ? (
+            <p className="text-xs text-stone-500">No time off scheduled. Add dates when this staff member is unavailable.</p>
+          ) : (
+            <div className="space-y-2">
+              {timeOff.map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between gap-2 text-xs bg-stone-50 border border-stone-100 rounded-xl px-3 py-2">
+                  <span className="text-stone-700 font-medium">
+                    {formatOffDate(entry.date)}
+                    {entry.startTime === '00:00' && entry.endTime === '23:59'
+                      ? ' · All day'
+                      : ` · ${entry.startTime}–${entry.endTime}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(entry.id)}
+                    className="text-red-500 hover:text-red-700 font-semibold shrink-0"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleAdd} className="space-y-2 bg-stone-50 border border-stone-100 rounded-xl p-3">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-stone-200 text-sm bg-white"
+              required
+            />
+            <label className="flex items-center gap-2 text-xs font-medium text-stone-600">
+              <input
+                type="checkbox"
+                checked={allDay}
+                onChange={(e) => setAllDay(e.target.checked)}
+                className="rounded border-stone-300"
+              />
+              All day unavailable
+            </label>
+            {!allDay && (
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-stone-200 text-sm bg-white"
+                />
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-stone-200 text-sm bg-white"
+                />
+              </div>
+            )}
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full py-2 rounded-lg bg-stone-900 text-white text-xs font-bold hover:bg-stone-800 disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Add time off'}
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -401,27 +606,30 @@ export function SellerMenuImportReviewModal({
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {service.variants.map((variant, variantIndex) => (
-                    <div key={`${serviceIndex}-${variant.targetGender}`} className="grid grid-cols-3 gap-3 items-center">
-                      <div className="text-xs font-bold text-stone-500 bg-white border border-stone-200 rounded-xl px-3 py-3 text-center">
+                  {service.variants.map((variant, variantIndex) => {
+                    const styles = getGenderVariantStyles(variant.targetGender);
+                    return (
+                    <div key={`${serviceIndex}-${variant.targetGender}`} className={`grid grid-cols-3 gap-3 items-center ${styles.row}`}>
+                      <div className={`text-xs font-bold border rounded-xl px-3 py-3 text-center ${styles.label}`}>
                         {variant.targetGender}
                       </div>
                       <input
                         type="number"
                         placeholder="Price (Rs)"
-                        className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+                        className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 ${styles.input}`}
                         value={variant.price}
                         onChange={(e) => onVariantChange(serviceIndex, variantIndex, 'price', e.target.value)}
                       />
                       <input
                         type="number"
                         placeholder="Duration (min)"
-                        className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white"
+                        className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 ${styles.input}`}
                         value={variant.duration}
                         onChange={(e) => onVariantChange(serviceIndex, variantIndex, 'duration', e.target.value)}
                       />
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))

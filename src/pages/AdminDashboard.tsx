@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw, KeyRound, Megaphone, Star } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Link } from 'react-router-dom';
+import { toast } from '../store/useToastStore';
 
 export default function AdminDashboard() {
   const { token } = useAuthStore();
@@ -93,7 +94,7 @@ export default function AdminDashboard() {
         setUsers(users.filter(u => u.id !== id));
         setStats({ ...stats, users: stats.users - 1 });
       } else {
-        alert('Failed to delete user');
+        toast.error('Failed to delete user');
       }
     } catch (err) {
       console.error(err);

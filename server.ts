@@ -14,6 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import ws from 'ws';
 import posthog from './src/lib/posthog-server.js';
+import { bookingTimeMs, isBookingUpcoming, nowBookingTimeMs } from './src/lib/bookingTime.js';
 
 dotenv.config();
 
@@ -741,6 +742,38 @@ function dayUtcBounds(date: string) {
   return { dayStart, dayEnd, day: dayStart.getUTCDay() };
 }
 
+type StaleBookingScope = { salonId?: string; userId?: string; bookingId?: string };
+
+/** Auto-cancel PENDING bookings whose appointment time has passed. */
+async function expireStalePendingBookings(
+  prismaClient: PrismaClient,
+  scope: StaleBookingScope = {},
+) {
+  const pending = await prismaClient.booking.findMany({
+    where: {
+      status: 'PENDING',
+      ...(scope.salonId ? { salonId: scope.salonId } : {}),
+      ...(scope.userId ? { userId: scope.userId } : {}),
+      ...(scope.bookingId ? { id: scope.bookingId } : {}),
+    },
+    select: { id: true, startTime: true },
+  });
+
+  const nowMs = nowBookingTimeMs();
+  const expiredIds = pending
+    .filter((booking) => bookingTimeMs(booking.startTime) <= nowMs)
+    .map((booking) => booking.id);
+
+  if (expiredIds.length === 0) return 0;
+
+  await prismaClient.booking.updateMany({
+    where: { id: { in: expiredIds } },
+    data: { status: 'CANCELLED' },
+  });
+
+  return expiredIds.length;
+}
+
 function activeBookingsWhereForDay(dayStart: Date, dayEnd: Date) {
   const fifteenMinsAgo = new Date(Date.now() - 15 * 60000);
   return {
@@ -997,8 +1030,14 @@ async function getAvailableSlots(
         return isOverlapping(start, slotEnd, bStart, bEnd);
       });
 
+      const timeOffConflict = (staff.timeOff || []).some((off) => {
+        const offStart = timeToMinutes(off.startTime);
+        const offEnd = timeToMinutes(off.endTime);
+        return isOverlapping(start, slotEnd, offStart, offEnd);
+      });
+
       const timeStr = minutesToTime(start);
-      if (!conflict) {
+      if (!conflict && !timeOffConflict) {
         slotMap.set(timeStr, true);
       } else if (!slotMap.has(timeStr)) {
         slotMap.set(timeStr, false);
@@ -1140,6 +1179,24 @@ async function createBooking(prisma: PrismaClient, data: any) {
 
     if (conflict) {
       throw new Error("Slot already booked");
+    }
+
+    const dayStart = new Date(
+      Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()),
+    );
+    const timeOffEntries = await tx.staffTimeOff.findMany({
+      where: { staffId: resolvedStaffId, date: dayStart },
+    });
+    const blockedByTimeOff = timeOffEntries.some((off) =>
+      isOverlapping(
+        startMinutes,
+        endMinutes,
+        timeToMinutes(off.startTime),
+        timeToMinutes(off.endTime),
+      ),
+    );
+    if (blockedByTimeOff) {
+      throw new Error('Selected professional is not available at this time');
     }
 
     // If a staffId was provided, ensure they are actually available for that slot.
@@ -1402,6 +1459,10 @@ export async function createApp() {
           openTime: true,
           closeTime: true,
           featured: true,
+          hours: {
+            select: { dayOfWeek: true, isOpen: true, startTime: true, endTime: true },
+            orderBy: { dayOfWeek: 'asc' },
+          },
           _count: { select: { services: true, reviews: true } },
           reviews: { select: { rating: true } },
         },
@@ -1467,7 +1528,12 @@ export async function createApp() {
         include: {
           services: { include: { variants: true } },
           hours: { orderBy: { dayOfWeek: 'asc' } },
-          staff: { where: { isActive: true, NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } } }
+          staff: {
+            where: { isActive: true, NOT: { skills: SALON_DEFAULT_STAFF_SKILLS } },
+            include: {
+              timeOff: { orderBy: { date: 'asc' } },
+            },
+          }
         }
       });
       res.json(salon || null);
@@ -1666,7 +1732,6 @@ export async function createApp() {
     });
   });
 
-  // Seller: Manage Services
   app.post('/api/seller/services', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
     const { name, variants } = req.body;
@@ -1725,6 +1790,79 @@ export async function createApp() {
     } catch (error: any) {
       console.error('Failed to add service:', error);
       const message = typeof error?.message === 'string' ? error.message : 'Failed to add service';
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.put('/api/seller/services/:id', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+    const { name, variants } = req.body;
+    try {
+      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      const existing = await prisma.service.findFirst({
+        where: { id: req.params.id, salonId: salon.id },
+      });
+      if (!existing) return res.status(404).json({ error: 'Service not found' });
+
+      const variantValidation = normalizeAndValidateVariants(variants);
+      if (variantValidation.ok === false) {
+        return res.status(400).json({ error: variantValidation.error });
+      }
+      const normalizedVariants = variantValidation.variants;
+      const baseVariant = normalizedVariants[0];
+
+      const service = await prisma.$transaction(async (tx) => {
+        await tx.service.update({
+          where: { id: existing.id },
+          data: {
+            name: String(name || existing.name).trim(),
+            price: baseVariant.price,
+            duration: baseVariant.duration,
+          },
+        });
+
+        for (const variant of normalizedVariants) {
+          await tx.serviceVariant.upsert({
+            where: {
+              serviceId_targetGender: {
+                serviceId: existing.id,
+                targetGender: variant.targetGender,
+              },
+            },
+            create: {
+              serviceId: existing.id,
+              targetGender: variant.targetGender,
+              price: variant.price,
+              duration: variant.duration,
+            },
+            update: {
+              price: variant.price,
+              duration: variant.duration,
+            },
+          });
+        }
+
+        const keepGenders = normalizedVariants.map((variant) => variant.targetGender);
+        await tx.serviceVariant.deleteMany({
+          where: {
+            serviceId: existing.id,
+            targetGender: { notIn: keepGenders },
+          },
+        });
+
+        return tx.service.findUnique({
+          where: { id: existing.id },
+          include: { variants: true },
+        });
+      });
+
+      invalidateSalonsListCache();
+      res.json(service);
+    } catch (error: any) {
+      console.error('Failed to update service:', error);
+      const message = typeof error?.message === 'string' ? error.message : 'Failed to update service';
       res.status(500).json({ error: message });
     }
   });
@@ -1860,6 +1998,90 @@ export async function createApp() {
     }
   });
 
+  app.get('/api/seller/staff/:id/time-off', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      const staff = await prisma.staff.findFirst({
+        where: { id: req.params.id, salonId: salon.id, isActive: true },
+      });
+      if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+      const timeOff = await prisma.staffTimeOff.findMany({
+        where: { staffId: staff.id },
+        orderBy: { date: 'asc' },
+      });
+      res.json(timeOff);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch time off' });
+    }
+  });
+
+  app.post('/api/seller/staff/:id/time-off', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+    const { date, startTime, endTime, allDay } = req.body;
+    try {
+      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      const staff = await prisma.staff.findFirst({
+        where: { id: req.params.id, salonId: salon.id, isActive: true },
+      });
+      if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+      if (!date || typeof date !== 'string') {
+        return res.status(400).json({ error: 'Date is required (YYYY-MM-DD).' });
+      }
+
+      const dayStart = new Date(`${date}T00:00:00.000Z`);
+      if (Number.isNaN(dayStart.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+      }
+
+      const resolvedStart = allDay ? '00:00' : String(startTime || '09:00');
+      const resolvedEnd = allDay ? '23:59' : String(endTime || '18:00');
+      if (timeToMinutes(resolvedStart) >= timeToMinutes(resolvedEnd)) {
+        return res.status(400).json({ error: 'End time must be after start time.' });
+      }
+
+      const entry = await prisma.staffTimeOff.create({
+        data: {
+          staffId: staff.id,
+          date: dayStart,
+          startTime: resolvedStart,
+          endTime: resolvedEnd,
+        },
+      });
+      res.json(entry);
+    } catch (error) {
+      console.error('Failed to add staff time off:', error);
+      res.status(500).json({ error: 'Failed to add time off' });
+    }
+  });
+
+  app.delete('/api/seller/staff/:id/time-off/:timeOffId', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
+      if (!salon) return res.status(400).json({ error: 'Create salon first' });
+
+      const staff = await prisma.staff.findFirst({
+        where: { id: req.params.id, salonId: salon.id },
+      });
+      if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+      const deleted = await prisma.staffTimeOff.deleteMany({
+        where: { id: req.params.timeOffId, staffId: staff.id },
+      });
+      if (deleted.count === 0) return res.status(404).json({ error: 'Time off not found' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to delete time off' });
+    }
+  });
+
   // Bookings
   app.get('/api/slots', requireAuth, async (req: Request, res: Response) => {
     try {
@@ -1933,6 +2155,8 @@ export async function createApp() {
 
   app.get('/api/bookings/my', requireAuth, async (req: Request, res: Response) => {
     try {
+      await expireStalePendingBookings(prisma, { userId: req.user.userId });
+
       const [bookings, reviews] = await Promise.all([
         prisma.booking.findMany({
           where: { userId: req.user.userId },
@@ -1963,6 +2187,8 @@ export async function createApp() {
     try {
       const salon = await prisma.salon.findFirst({ where: { ownerId: req.user.userId } });
       if (!salon) return res.json([]);
+
+      await expireStalePendingBookings(prisma, { salonId: salon.id });
       
       const bookings = await prisma.booking.findMany({
         where: { salonId: salon.id },
@@ -1997,6 +2223,18 @@ export async function createApp() {
       if (!isOwner && !isSalonOwner && !isAdmin) {
         return res.status(403).json({ error: 'Forbidden' });
       }
+
+      await expireStalePendingBookings(prisma, { bookingId: booking.id });
+      const currentBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      if (!currentBooking) return res.status(404).json({ error: 'Booking not found' });
+
+      if (
+        currentBooking.status === 'PENDING' &&
+        !isBookingUpcoming(currentBooking.startTime) &&
+        (status === 'CONFIRMED' || status === 'PENDING')
+      ) {
+        return res.status(400).json({ error: 'This booking has expired because the appointment time has passed.' });
+      }
       
       // Restriction: Customers can only cancel
       if (isOwner && !isSalonOwner && !isAdmin && status !== 'CANCELLED') {
@@ -2009,7 +2247,7 @@ export async function createApp() {
           data: { status }
         });
 
-        if (status !== 'NO_SHOW' || booking.status === 'NO_SHOW') {
+        if (status !== 'NO_SHOW' || currentBooking.status === 'NO_SHOW') {
           return { updatedBooking, accountDeactivated: false };
         }
 
@@ -2297,6 +2535,8 @@ export async function createApp() {
   app.get('/api/admin/salons/:id', requireAuth, async (req: Request, res: Response) => {
     if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
     try {
+      await expireStalePendingBookings(prisma, { salonId: req.params.id });
+
       const salon = await prisma.salon.findUnique({
         where: { id: req.params.id },
         include: {
@@ -2536,7 +2776,17 @@ export async function createApp() {
       });
       if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
       if (!assertCanManageBookingAction(req, res, booking)) return;
-      res.json(booking);
+      await expireStalePendingBookings(prisma, { bookingId: booking.id });
+      const refreshed = await prisma.booking.findUnique({
+        where: { id: booking.id },
+        include: {
+          user: { select: { name: true, phone: true } },
+          salon: { select: { name: true, ownerId: true } },
+          staff: { select: { name: true } },
+          services: { include: { service: { select: { name: true } } } },
+        },
+      });
+      res.json(refreshed);
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch booking' });
     }
@@ -2554,8 +2804,17 @@ export async function createApp() {
       });
       if (!booking) return res.status(404).json({ error: 'Booking not found or link expired' });
       if (!assertCanManageBookingAction(req, res, booking)) return;
-      if (booking.status !== 'PENDING') {
-        return res.status(400).json({ error: `Cannot change status from ${booking.status}` });
+
+      await expireStalePendingBookings(prisma, { bookingId: booking.id });
+      const currentBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      if (!currentBooking) return res.status(404).json({ error: 'Booking not found or link expired' });
+
+      if (currentBooking.status !== 'PENDING') {
+        return res.status(400).json({ error: `Cannot change status from ${currentBooking.status}` });
+      }
+
+      if (!isBookingUpcoming(currentBooking.startTime)) {
+        return res.status(400).json({ error: 'This booking has expired because the appointment time has passed.' });
       }
 
       const updated = await prisma.booking.update({

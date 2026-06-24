@@ -9,6 +9,7 @@ import { useAuthStore } from './store/useAuthStore';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 import { identifyUser, resetAnalytics } from './lib/analytics';
 import { AnalyticsProvider } from './components/AnalyticsProvider';
+import ToastContainer from './components/ui/Toast';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -127,6 +128,7 @@ export default function App() {
     <Router>
       <AuthAnalyticsSync />
       <AnalyticsProvider>
+        <ToastContainer />
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<Landing />} />

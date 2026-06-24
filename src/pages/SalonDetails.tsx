@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard, X } from 'lucide-react';
+import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard, X, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { format, addDays, startOfToday, isSameDay } from 'date-fns';
 import { buildBookingIso } from '../lib/bookingTime';
 import { isSalonOpenOnDate, normalizeWeeklyHoursFromApi } from '../lib/salonHours';
@@ -19,6 +19,7 @@ export default function SalonDetails() {
   };
   const [salon, setSalon] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   
   // Booking state
   const [selectedServices, setSelectedServices] = useState<any[]>([]);
@@ -62,6 +63,7 @@ export default function SalonDetails() {
   }, [id]);
 
   useEffect(() => {
+    setFetchError(null);
     fetch(`/api/salons/${id}`)
       .then(async res => {
         const data = await res.json();
@@ -74,6 +76,7 @@ export default function SalonDetails() {
       })
       .catch(err => {
         console.error(err);
+        setFetchError(err instanceof Error ? err.message : 'Failed to load salon');
         setLoading(false);
       });
   }, [id]);
@@ -237,7 +240,19 @@ export default function SalonDetails() {
   }, [weeklyHours, salon?.id, selectedDate, dates]);
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
-  if (!salon) return <div className="text-center py-20 text-stone-500">Salon not found</div>;
+  if (!salon) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <AlertTriangle className="w-12 h-12 text-stone-400 mx-auto" />
+        <h2 className="text-2xl font-bold text-stone-900 font-display">Salon not found</h2>
+        <p className="text-stone-500">{fetchError || 'This salon may have been removed or the link is incorrect.'}</p>
+        <Link to="/explore" className="inline-flex items-center gap-2 mt-4 px-6 py-3 bg-stone-900 text-white rounded-xl font-bold hover:bg-stone-800 transition-colors">
+          <ArrowLeft className="w-4 h-4" />
+          Back to Explore
+        </Link>
+      </div>
+    );
+  }
 
   const bookingTotal = selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.price ?? 0), 0);
   const bookingDuration = selectedServices.reduce((acc, s) => acc + (getEffectiveVariant(s)?.duration ?? 0), 0);
@@ -530,9 +545,16 @@ export default function SalonDetails() {
                 {/* Summary */}
                 <div className="bg-gradient-to-b from-stone-50 to-white p-5 md:p-6 rounded-2xl border border-stone-200/60">
                   {user && !user.gender && (
-                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-                      Please set your gender in profile to see final pricing and continue booking.
-                    </p>
+                    <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+                      <p className="font-semibold mb-1">Profile gender required</p>
+                      <p className="text-amber-700 text-xs mb-3">Set your gender to see accurate pricing and complete your booking.</p>
+                      <Link
+                        to="/dashboard/customer?tab=profile"
+                        className="inline-flex items-center text-xs font-bold text-amber-900 underline underline-offset-2"
+                      >
+                        Update profile →
+                      </Link>
+                    </div>
                   )}
                   <div className="mb-4">
                     {selectedServices.map(s => (

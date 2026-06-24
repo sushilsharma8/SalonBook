@@ -53,3 +53,29 @@ export function isSalonOpenOnDate(hours: SalonDayHours[], date: Date): boolean {
   const row = hours.find((h) => h.dayOfWeek === day);
   return row?.isOpen ?? true;
 }
+
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+/** Whether the salon is open right now, using weekly hours when available. */
+export function isSalonOpenNow(
+  hours: SalonDayHours[] | null | undefined,
+  fallbackOpen: string,
+  fallbackClose: string,
+  now: Date = new Date(),
+): boolean {
+  const normalized = hours?.length
+    ? hours
+    : buildDefaultWeeklyHours(fallbackOpen, fallbackClose);
+
+  const day = now.getDay();
+  const row = normalized.find((h) => h.dayOfWeek === day);
+  if (!row?.isOpen) return false;
+
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const start = timeToMinutes(row.startTime);
+  const end = timeToMinutes(row.endTime);
+  return currentMins >= start && currentMins < end;
+}

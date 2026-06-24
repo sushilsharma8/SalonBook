@@ -1,13 +1,15 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
-import { formatBookingTime } from '../lib/bookingTime';
+import { formatBookingTime, isBookingUpcoming, isPendingBookingActionable } from '../lib/bookingTime';
 import { buildDefaultWeeklyHours, normalizeWeeklyHoursFromApi, type SalonDayHours } from '../lib/salonHours';
-import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ScanLine } from 'lucide-react';
+import { Plus, Settings, Users, Calendar, CheckCircle, XCircle, Scissors, Sparkles, Eye, Activity, ThermometerSun, Droplet, PenTool, Sun, Dumbbell, ScanLine, Edit2, AlertTriangle } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
+import { getGenderVariantStyles } from '../components/seller/SellerDashboardForms';
 import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
 import { SalonQRCard } from '../components/SalonQRCard';
 import { SellerOnboardingChecklist, SellerMarketingKit } from '../components/seller/SellerMarketingTools';
+import { toast } from '../store/useToastStore';
 
 const CATEGORIES = [
   { id: 'hair', label: 'Hair salon', icon: Scissors },
@@ -41,6 +43,9 @@ const SellerServiceForm = lazyWithRetry(() =>
 const SellerStaffForm = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerStaffForm })),
 );
+const StaffTimeOffPanel = lazyWithRetry(() =>
+  import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.StaffTimeOffPanel })),
+);
 const SellerMenuImportReviewModal = lazyWithRetry(() =>
   import('../components/seller/SellerDashboardForms').then((module) => ({ default: module.SellerMenuImportReviewModal })),
 );
@@ -55,10 +60,12 @@ export default function SellerDashboard() {
   const [salon, setSalon] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   
   // Forms
   const [showSalonForm, setShowSalonForm] = useState(false);
   const [showServiceForm, setShowServiceForm] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showStaffForm, setShowStaffForm] = useState(false);
   
   const [salonData, setSalonData] = useState({ name: '', address: '', openTime: '09:00', closeTime: '18:00' });
@@ -83,6 +90,7 @@ export default function SellerDashboard() {
   const [importError, setImportError] = useState('');
   const [importingBulk, setImportingBulk] = useState(false);
   const [importNotice, setImportNotice] = useState('');
+  const [bookingsTab, setBookingsTab] = useState<'active' | 'past'>('active');
   const menuImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -91,6 +99,7 @@ export default function SellerDashboard() {
 
   const fetchData = async () => {
     try {
+      setFetchError(null);
       const [salonRes, bookingsRes] = await Promise.all([
         fetch('/api/seller/salon', { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch('/api/seller/bookings', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -127,8 +136,39 @@ export default function SellerDashboard() {
       setLoading(false);
     } catch (err) {
       console.error(err);
+      setFetchError(err instanceof Error ? err.message : 'Failed to load dashboard');
       setLoading(false);
     }
+  };
+
+  const resetServiceForm = () => {
+    setServiceData({
+      name: '',
+      variants: [
+        { targetGender: 'MALE', price: '', duration: '' },
+        { targetGender: 'FEMALE', price: '', duration: '' },
+      ],
+    });
+    setServiceError('');
+    setEditingServiceId(null);
+    setShowServiceForm(false);
+  };
+
+  const handleEditService = (service: any) => {
+    const variants = service.variants?.length
+      ? service.variants.map((v: any) => ({
+          targetGender: v.targetGender,
+          price: String(v.price),
+          duration: String(v.duration),
+        }))
+      : [
+          { targetGender: 'MALE', price: '', duration: '' },
+          { targetGender: 'FEMALE', price: '', duration: '' },
+        ];
+    setServiceData({ name: service.name, variants });
+    setEditingServiceId(service.id);
+    setShowServiceForm(true);
+    setServiceError('');
   };
 
   const handleSalonSubmit = async (e: React.FormEvent) => {
@@ -235,8 +275,8 @@ export default function SellerDashboard() {
         return;
       }
 
-      const res = await fetch('/api/seller/services', {
-        method: 'POST',
+      const res = await fetch(editingServiceId ? `/api/seller/services/${editingServiceId}` : '/api/seller/services', {
+        method: editingServiceId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           name: serviceData.name.trim(),
@@ -253,17 +293,12 @@ export default function SellerDashboard() {
       }
 
       if (res.ok) {
-        setShowServiceForm(false);
-        setServiceData({
-          name: '',
-          variants: [
-            { targetGender: 'MALE', price: '', duration: '' },
-            { targetGender: 'FEMALE', price: '', duration: '' },
-          ],
-        });
+        const wasEdit = Boolean(editingServiceId);
+        resetServiceForm();
         fetchData();
+        toast.success(wasEdit ? 'Service updated' : 'Service added');
       } else {
-        setServiceError(data?.error || raw || `Failed to add service (HTTP ${res.status})`);
+        setServiceError(data?.error || raw || `Failed to save service (HTTP ${res.status})`);
       }
     } catch (err) {
       console.error(err);
@@ -283,6 +318,7 @@ export default function SellerDashboard() {
         setShowStaffForm(false);
         setStaffData({ name: '', skills: '', gender: 'OTHER' });
         fetchData();
+        toast.success('Staff member added');
       }
     } catch (err) {
       console.error(err);
@@ -296,7 +332,12 @@ export default function SellerDashboard() {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) fetchData();
+      if (res.ok) {
+        fetchData();
+        toast.success('Service deleted');
+      } else {
+        toast.error('Failed to delete service');
+      }
     } catch (err) {
       console.error(err);
     }
@@ -309,9 +350,15 @@ export default function SellerDashboard() {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) fetchData();
+      if (res.ok) {
+        fetchData();
+        toast.success('Staff member removed');
+      } else {
+        toast.error('Failed to remove staff member');
+      }
     } catch (err) {
       console.error(err);
+      toast.error('Failed to remove staff member');
     }
   };
 
@@ -505,6 +552,27 @@ export default function SellerDashboard() {
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
 
+  if (fetchError) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <AlertTriangle className="w-12 h-12 text-red-400 mx-auto" />
+        <p className="text-xl font-medium text-stone-900">Could not load dashboard</p>
+        <p className="text-stone-500">{fetchError}</p>
+        <button
+          onClick={() => { setLoading(true); fetchData(); }}
+          className="px-6 py-2.5 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const activeBookings = bookings.filter((b) => isBookingUpcoming(b.startTime) && b.status !== 'CANCELLED');
+  const pastBookings = bookings.filter((b) => !isBookingUpcoming(b.startTime) || b.status === 'CANCELLED');
+  const displayedBookings = bookingsTab === 'active' ? activeBookings : pastBookings;
+  const pendingActionCount = bookings.filter((b) => isPendingBookingActionable(b)).length;
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 relative overflow-hidden">
@@ -525,6 +593,22 @@ export default function SellerDashboard() {
           </button>
         )}
       </div>
+
+      {salon && pendingActionCount > 0 && !showSalonForm && (
+        <button
+          type="button"
+          onClick={() => setBookingsTab('active')}
+          className="w-full text-left bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center gap-3 hover:bg-amber-100/80 transition-colors"
+        >
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+          <div>
+            <p className="font-bold text-amber-900">
+              {pendingActionCount} booking{pendingActionCount === 1 ? '' : 's'} awaiting your response
+            </p>
+            <p className="text-sm text-amber-700">Tap to review pending requests in Active bookings.</p>
+          </div>
+        </button>
+      )}
 
       {salon && !showSalonForm && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -552,7 +636,7 @@ export default function SellerDashboard() {
             </div>
             <div>
               <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Pending</p>
-              <p className="text-2xl md:text-3xl font-bold text-stone-900 font-display">{bookings.filter(b => b.status === 'PENDING').length}</p>
+              <p className="text-2xl md:text-3xl font-bold text-stone-900 font-display">{pendingActionCount}</p>
             </div>
           </div>
         </div>
@@ -658,9 +742,11 @@ export default function SellerDashboard() {
                   <SellerServiceForm
                     serviceData={serviceData}
                     serviceError={serviceError}
+                    submitLabel={editingServiceId ? 'Save Changes' : 'Add Service'}
                     onSubmit={handleServiceSubmit}
                     onNameChange={handleServiceNameChange}
                     onVariantChange={handleServiceVariantChange}
+                    onCancel={resetServiceForm}
                   />
                 </Suspense>
               )}
@@ -676,18 +762,26 @@ export default function SellerDashboard() {
                         <div className="min-w-0">
                           <div className="font-bold text-stone-900 text-base sm:text-lg">{s.name}</div>
                           <div className="text-xs text-stone-500 font-medium mt-1 flex flex-wrap gap-1.5">
-                            {(s.variants || []).map((v: any) => (
-                              <span key={v.targetGender} className="bg-stone-50 border border-stone-100 px-2 py-0.5 rounded-md">
+                            {(s.variants || []).map((v: any) => {
+                              const styles = getGenderVariantStyles(v.targetGender);
+                              return (
+                              <span key={v.targetGender} className={`border px-2 py-0.5 rounded-md ${styles.label}`}>
                                 {v.targetGender}: ₹{v.price}/{v.duration}m
                               </span>
-                            ))}
+                              );
+                            })}
                             {(!s.variants || s.variants.length === 0) && <span>No variants</span>}
                           </div>
                         </div>
                       </div>
-                      <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0">
-                        <XCircle className="w-5 h-5" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => handleEditService(s)} className="text-stone-500 hover:bg-stone-100 p-2 rounded-lg transition-colors" title="Edit service">
+                          <Edit2 className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0">
+                          <XCircle className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -714,19 +808,31 @@ export default function SellerDashboard() {
               
               <div className="space-y-4">
                 {salon.staff?.map((s: any) => (
-                  <div key={s.id} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-stone-200/60 transition-all hover:border-stone-300 hover:shadow-sm">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-12 h-12 rounded-xl border shrink-0 flex items-center justify-center font-bold text-base ${getStaffAvatarClasses(s.gender)}`}>
-                        {getStaffInitial(s.name)}
+                  <div key={s.id} className="p-5 bg-white rounded-2xl border border-stone-200/60 transition-all hover:border-stone-300 hover:shadow-sm">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-12 h-12 rounded-xl border shrink-0 flex items-center justify-center font-bold text-base ${getStaffAvatarClasses(s.gender)}`}>
+                          {getStaffInitial(s.name)}
+                        </div>
+                        <div>
+                          <div className="font-bold text-stone-900 text-lg">{s.name}</div>
+                          <div className="text-sm text-stone-500 font-medium">{s.skills || 'General Specialist'}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-stone-900 text-lg">{s.name}</div>
-                        <div className="text-sm text-stone-500 font-medium">{s.skills || 'General Specialist'}</div>
-                      </div>
+                      <button onClick={() => handleDeleteStaff(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                        <XCircle className="w-5 h-5" />
+                      </button>
                     </div>
-                    <button onClick={() => handleDeleteStaff(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors">
-                      <XCircle className="w-5 h-5" />
-                    </button>
+                    <Suspense fallback={<p className="text-xs text-stone-400 mt-3">Loading time off...</p>}>
+                      <StaffTimeOffPanel
+                        staffId={s.id}
+                        salonOpenTime={salon.openTime}
+                        salonCloseTime={salon.closeTime}
+                        timeOff={s.timeOff || []}
+                        token={token!}
+                        onUpdated={fetchData}
+                      />
+                    </Suspense>
                   </div>
                 ))}
                 {(!salon.staff || salon.staff.length === 0) && (
@@ -741,15 +847,34 @@ export default function SellerDashboard() {
           {/* Right Column: Bookings */}
           <div className="lg:col-span-2">
             <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60">
-              <h2 className="text-2xl md:text-3xl font-bold text-stone-900 mb-8 flex items-center font-display tracking-tight"><Calendar className="w-8 h-8 mr-3 text-stone-900" /> Bookings</h2>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                <h2 className="text-2xl md:text-3xl font-bold text-stone-900 flex items-center font-display tracking-tight"><Calendar className="w-8 h-8 mr-3 text-stone-900" /> Bookings</h2>
+                <div className="flex bg-stone-100 p-1 rounded-xl">
+                  <button
+                    onClick={() => setBookingsTab('active')}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${bookingsTab === 'active' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
+                  >
+                    Active ({activeBookings.length})
+                  </button>
+                  <button
+                    onClick={() => setBookingsTab('past')}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${bookingsTab === 'past' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
+                  >
+                    Past ({pastBookings.length})
+                  </button>
+                </div>
+              </div>
               
-              {bookings.length === 0 ? (
+              {displayedBookings.length === 0 ? (
                 <div className="text-center py-16 bg-stone-50 rounded-[2rem] border border-dashed border-stone-200 text-stone-500">
-                  No bookings yet.
+                  {bookingsTab === 'active' ? 'No upcoming bookings.' : 'No past bookings yet.'}
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {bookings.map(booking => (
+                  {displayedBookings.map(booking => {
+                    const canRespondToPending = isPendingBookingActionable(booking);
+
+                    return (
                       <div key={booking.id} className="bg-white p-6 rounded-[2rem] border border-stone-200/60 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 transition-all hover:shadow-md hover:border-stone-300">
                         <div className="flex items-start space-x-5 flex-1">
                           <div className="w-14 h-14 bg-stone-50 rounded-2xl flex items-center justify-center border border-stone-100 shrink-0 hidden sm:flex">
@@ -802,7 +927,7 @@ export default function SellerDashboard() {
                             </a>
                           )}
 
-                          {booking.status === 'PENDING' && (
+                          {canRespondToPending && (
                             <div className="flex space-x-2 w-full">
                               <button onClick={() => updateBookingStatus(booking.id, 'CONFIRMED')} className="flex-1 md:flex-none flex items-center justify-center px-4 py-2.5 bg-stone-900 text-white hover:bg-stone-800 rounded-xl text-sm font-bold transition-colors shadow-sm">
                                 <CheckCircle className="w-4 h-4 mr-1.5" /> Confirm
@@ -825,7 +950,8 @@ export default function SellerDashboard() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

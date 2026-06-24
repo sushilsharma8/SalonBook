@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { formatBookingTime } from '../lib/bookingTime';
+import { formatBookingTime, isPendingBookingActionable } from '../lib/bookingTime';
 import { CheckCircle, XCircle, Calendar, Clock, User, Scissors, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -89,7 +89,7 @@ export default function BookingAction() {
   if (!booking) return null;
 
   const services = booking.services?.map((s: any) => s.serviceNameAtBooking || s.service?.name).join(', ') || 'Service';
-  const isPending = booking.status === 'PENDING';
+  const canRespondToPending = isPendingBookingActionable(booking);
 
   return (
     <div className="max-w-lg mx-auto space-y-6">
@@ -149,7 +149,7 @@ export default function BookingAction() {
           }`}>
             {actionDone === 'CONFIRMED' ? 'Booking accepted! The customer has been notified.' : 'Booking rejected.'}
           </div>
-        ) : isPending ? (
+        ) : canRespondToPending ? (
           <div className="grid grid-cols-2 gap-3 pt-2">
             <button
               onClick={() => handleAction('CONFIRMED')}
@@ -167,6 +167,10 @@ export default function BookingAction() {
               <XCircle className="w-5 h-5" />
               <span>{actionLoading ? 'Processing...' : 'Reject'}</span>
             </button>
+          </div>
+        ) : booking.status === 'PENDING' ? (
+          <div className="p-4 rounded-xl text-center font-medium bg-stone-50 text-stone-600 border border-stone-200">
+            This booking expired because the appointment time has passed.
           </div>
         ) : (
           <div className="text-center text-stone-500 text-sm py-2">

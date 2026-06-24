@@ -2,7 +2,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
-import { formatBookingTime } from '../lib/bookingTime';
+import { formatBookingTime, isPendingBookingActionable } from '../lib/bookingTime';
 import { ArrowLeft, Save, Plus, XCircle, Scissors, Users, Calendar, MapPin, Clock, Edit2, CheckCircle, ScanLine } from 'lucide-react';
 import type { ImportedServiceDraft } from '../components/seller/SellerDashboardForms';
 import { mapExtractedServicesToDrafts, normalizeImportedServicesForApi, prepareMenuImageForUpload } from '../lib/serviceImport';
@@ -21,6 +21,28 @@ const getStaffAvatarClasses = (gender?: string | null) => {
   if (gender === 'MALE') return 'bg-blue-100 text-blue-700 border-blue-200';
   if (gender === 'FEMALE') return 'bg-pink-100 text-pink-700 border-pink-200';
   return 'bg-stone-100 text-stone-700 border-stone-200';
+};
+
+const getGenderVariantStyles = (targetGender: string) => {
+  if (targetGender === 'MALE') {
+    return {
+      row: 'rounded-xl border border-blue-100 bg-blue-50/60 p-2',
+      label: 'bg-blue-100 text-blue-800 border-blue-200',
+      input: 'border-blue-200 bg-white focus:ring-blue-400 focus:border-blue-300',
+    };
+  }
+  if (targetGender === 'FEMALE') {
+    return {
+      row: 'rounded-xl border border-pink-100 bg-pink-50/60 p-2',
+      label: 'bg-pink-100 text-pink-800 border-pink-200',
+      input: 'border-pink-200 bg-white focus:ring-pink-400 focus:border-pink-300',
+    };
+  }
+  return {
+    row: 'rounded-xl border border-stone-200 bg-stone-50/60 p-2',
+    label: 'bg-stone-100 text-stone-700 border-stone-200',
+    input: 'border-stone-200 bg-white focus:ring-stone-900',
+  };
 };
 
 export default function AdminSalonManage() {
@@ -417,15 +439,18 @@ export default function AdminSalonManage() {
           {showServiceForm && (
             <form onSubmit={handleAddService} className="mb-6 space-y-3 bg-stone-50 p-4 rounded-xl border border-stone-200/60">
               <input type="text" placeholder="Service Name" required className="w-full px-4 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm" value={serviceForm.name} onChange={e => setServiceForm({ ...serviceForm, name: e.target.value })} />
-              {serviceForm.variants.map((v, i) => (
-                <div key={v.targetGender} className="grid grid-cols-3 gap-2">
-                  <div className="text-xs font-bold text-stone-500 bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-center">{v.targetGender}</div>
-                  <input type="number" placeholder="₹ Price" className="px-3 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm" value={v.price}
+              {serviceForm.variants.map((v, i) => {
+                const styles = getGenderVariantStyles(v.targetGender);
+                return (
+                <div key={v.targetGender} className={`grid grid-cols-3 gap-2 items-center ${styles.row}`}>
+                  <div className={`text-xs font-bold border rounded-xl px-3 py-2.5 text-center ${styles.label}`}>{v.targetGender}</div>
+                  <input type="number" placeholder="₹ Price" className={`px-3 py-2.5 rounded-xl border outline-none focus:ring-2 text-sm ${styles.input}`} value={v.price}
                     onChange={e => { const n = [...serviceForm.variants]; n[i] = { ...n[i], price: e.target.value }; setServiceForm({ ...serviceForm, variants: n }); }} />
-                  <input type="number" placeholder="Min" className="px-3 py-2.5 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-stone-900 bg-white text-sm" value={v.duration}
+                  <input type="number" placeholder="Min" className={`px-3 py-2.5 rounded-xl border outline-none focus:ring-2 text-sm ${styles.input}`} value={v.duration}
                     onChange={e => { const n = [...serviceForm.variants]; n[i] = { ...n[i], duration: e.target.value }; setServiceForm({ ...serviceForm, variants: n }); }} />
                 </div>
-              ))}
+                );
+              })}
               <button type="submit" className="w-full bg-stone-900 text-white py-2.5 rounded-xl font-bold text-sm hover:bg-stone-800">Add Service</button>
             </form>
           )}
@@ -515,7 +540,7 @@ export default function AdminSalonManage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-lg font-bold text-stone-900 font-display">₹{b.totalAmount}</span>
-                    {b.status === 'PENDING' && (
+                    {isPendingBookingActionable(b) && (
                       <>
                         <button onClick={() => updateBookingStatus(b.id, 'CONFIRMED')} className="px-3 py-1.5 bg-stone-900 text-white rounded-lg text-xs font-bold hover:bg-stone-800"><CheckCircle className="w-3.5 h-3.5 inline mr-1" />Accept</button>
                         <button onClick={() => updateBookingStatus(b.id, 'CANCELLED')} className="px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50"><XCircle className="w-3.5 h-3.5 inline mr-1" />Reject</button>

@@ -44,6 +44,18 @@ export function isBookingUpcoming(value: string | Date): boolean {
   return bookingTimeMs(value) > nowBookingTimeMs();
 }
 
+export function isBookingPast(value: string | Date): boolean {
+  return bookingTimeMs(value) <= nowBookingTimeMs();
+}
+
+/** PENDING bookings sellers can still accept or reject. */
+export function isPendingBookingActionable(booking: {
+  startTime: string | Date;
+  status: string;
+}): boolean {
+  return booking.status === 'PENDING' && isBookingUpcoming(booking.startTime);
+}
+
 export function formatBookingTime(value: string | Date, pattern: string): string {
   const d = toDate(value);
   const wallClock = new Date(

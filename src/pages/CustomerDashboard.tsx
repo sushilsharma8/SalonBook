@@ -3,9 +3,10 @@ import { useAuthStore } from '../store/useAuthStore';
 import { bookingTimeMs, formatBookingTime, isBookingUpcoming, nowBookingTimeMs } from '../lib/bookingTime';
 import { buildGoogleMapsDirectionsUrl } from '../lib/maps';
 import { Calendar, Clock, MapPin, Star, X, User, ArrowRight, Edit2, Check, Share2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { buildSalonUrl } from '../lib/utm';
 import { trackEvent } from '../lib/analytics';
+import { toast } from '../store/useToastStore';
 
 /** Title-case words for display (fixes all-lowercase copy from seed/API). */
 function toTitleCase(value: string | undefined | null): string {
@@ -28,10 +29,14 @@ function toTitleCase(value: string | undefined | null): string {
 
 export default function CustomerDashboard() {
   const { token, user, setAuth } = useAuthStore();
+  const [searchParams] = useSearchParams();
   const [bookings, setBookings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'upcoming' | 'past' | 'profile'>('upcoming');
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'past' | 'profile'>(
+    searchParams.get('tab') === 'profile' ? 'profile' : 'upcoming',
+  );
   
   // Profile Edit State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -49,6 +54,7 @@ export default function CustomerDashboard() {
   const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
+    setFetchError(null);
     fetch('/api/bookings/my', {
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -58,7 +64,6 @@ export default function CustomerDashboard() {
         return data;
       })
       .then(data => {
-        // Handle both old array format and new object format
         if (Array.isArray(data)) {
           setBookings(data);
         } else {
@@ -69,6 +74,7 @@ export default function CustomerDashboard() {
       })
       .catch(err => {
         console.error(err);
+        setFetchError(err instanceof Error ? err.message : 'Failed to load bookings');
         setLoading(false);
       });
   }, [token]);
@@ -101,6 +107,7 @@ export default function CustomerDashboard() {
       });
       if (res.ok) {
         setBookings(bookings.map(b => b.id === id ? { ...b, status: 'CANCELLED' } : b));
+        toast.success('Booking cancelled');
 
         const booking = bookings.find((b) => b.id === id);
         const ownerPhoneRaw = booking?.salon?.owner?.phone;
@@ -117,9 +124,13 @@ export default function CustomerDashboard() {
             `${booking?.startTime ? ` on ${formatBookingTime(booking.startTime, 'MMM d, yyyy')} at ${formatBookingTime(booking.startTime, 'h:mm a')}` : ''}.`;
           window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
         }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to cancel booking');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Failed to cancel booking');
     }
   };
 
@@ -148,9 +159,10 @@ export default function CustomerDashboard() {
         setReviewModal(null);
         setRating(5);
         setComment('');
+        toast.success('Review submitted');
       } else {
         const data = await res.json();
-        alert(data.error || 'Failed to submit review');
+        toast.error(data.error || 'Failed to submit review');
       }
     } catch (err) {
       console.error(err);
@@ -174,8 +186,9 @@ export default function CustomerDashboard() {
         const updatedUser = await res.json();
         setAuth(updatedUser, token!);
         setIsEditingProfile(false);
+        toast.success('Profile updated');
       } else {
-        alert('Failed to update profile');
+        toast.error('Failed to update profile');
       }
     } catch (err) {
       console.error(err);
@@ -185,6 +198,21 @@ export default function CustomerDashboard() {
   };
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-stone-900"></div></div>;
+
+  if (fetchError) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <p className="text-xl font-medium text-stone-900">Could not load your bookings</p>
+        <p className="text-stone-500">{fetchError}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-6 py-2.5 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   const upcomingBookings = bookings.filter(b => isBookingUpcoming(b.startTime) && b.status !== 'CANCELLED');
   const pastBookings = bookings.filter(b => !isBookingUpcoming(b.startTime) || b.status === 'CANCELLED');

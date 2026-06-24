@@ -34,29 +34,29 @@ function PosterPreview({
   const initial = salonInitial(salonName);
 
   return (
-    <div className="rounded-[1.25rem] border border-stone-200 bg-stone-50 overflow-hidden shadow-md">
+    <div className="w-full min-w-0 rounded-[1.25rem] border border-stone-200 bg-stone-50 overflow-hidden shadow-md">
       {photoUrl ? (
-        <div className="relative h-36 overflow-hidden bg-stone-800">
+        <div className="relative h-32 sm:h-36 overflow-hidden bg-stone-800">
           <img src={photoUrl} alt="" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-stone-900/90 via-stone-900/30 to-transparent" />
-          <h3 className="absolute bottom-0 left-0 right-0 p-4 text-lg font-bold text-white font-display tracking-tight leading-tight">
+          <h3 className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 text-base sm:text-lg font-bold text-white font-display tracking-tight leading-tight break-words">
             {salonName}
           </h3>
         </div>
       ) : (
-        <div className="bg-gradient-to-br from-stone-900 to-stone-800 px-6 py-7 text-center text-white">
+        <div className="bg-gradient-to-br from-stone-900 to-stone-800 px-4 sm:px-6 py-6 sm:py-7 text-center text-white">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 border border-white/20 text-xl font-bold font-display">
             {initial}
           </div>
-          <h3 className="text-lg font-bold font-display tracking-tight">{salonName}</h3>
+          <h3 className="text-base sm:text-lg font-bold font-display tracking-tight break-words">{salonName}</h3>
         </div>
       )}
-      <div className="px-5 py-5 text-center bg-stone-50">
+      <div className="px-4 sm:px-5 py-4 sm:py-5 text-center bg-stone-50">
         <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-1">Walk-in booking</p>
         <p className="text-sm font-bold text-stone-900 font-display mb-4 leading-snug">
           Book your next visit in under a minute
         </p>
-        <div className="inline-block rounded-2xl border-2 border-stone-200 bg-white p-3 shadow-sm">
+        <div className="inline-block max-w-full rounded-2xl border-2 border-stone-200 bg-white p-2.5 sm:p-3 shadow-sm">
           <QRCodeCanvas value={salonUrl} size={120} level="M" includeMargin bgColor="#ffffff" fgColor="#1c1917" />
         </div>
         <p className="mt-3 text-xs font-semibold text-stone-600">Scan with your phone camera</p>
@@ -209,52 +209,52 @@ export function SalonQRCard({ salonId, salonName, salonImages }: SalonQRCardProp
     copyStatus === 'copied' ? 'Copied!' : copyStatus === 'error' ? 'Copy failed' : 'Copy link';
 
   return (
-    <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-stone-200/60">
-      <h2 className="text-2xl font-bold text-stone-900 flex items-center font-display tracking-tight mb-2">
-        <QrCode className="w-6 h-6 mr-3 text-stone-900 shrink-0" />
-        Share &amp; promote your salon
+    <div className="bg-white p-4 sm:p-6 md:p-8 rounded-[2rem] shadow-sm border border-stone-200/60 overflow-hidden">
+      <h2 className="text-xl sm:text-2xl font-bold text-stone-900 flex items-start sm:items-center gap-2 sm:gap-3 font-display tracking-tight mb-2">
+        <QrCode className="w-5 h-5 sm:w-6 sm:h-6 text-stone-900 shrink-0 mt-0.5 sm:mt-0" />
+        <span>Share &amp; promote your salon</span>
       </h2>
-      <p className="text-sm text-stone-500 mb-6">
+      <p className="text-sm text-stone-500 mb-5 sm:mb-6">
         Print the poster for your reception desk, or share your booking link online.
         {!primaryImageUrl && ' Add salon photos to show them on the poster.'}
       </p>
 
-      <div className="grid gap-8 lg:grid-cols-2 lg:gap-10 items-start">
-        <div className="mx-auto w-full max-w-[280px] lg:max-w-none lg:mx-0">
+      <div className="grid min-w-0 gap-6 sm:gap-8 lg:grid-cols-2 lg:gap-10 items-start">
+        <div className="w-full min-w-0 lg:max-w-none">
           <PosterPreview salonName={salonName} photoUrl={primaryImageUrl} salonUrl={salonUrl} />
         </div>
 
-        <div className="space-y-4">
-          <div>
+        <div className="min-w-0 space-y-4">
+          <div className="min-w-0">
             <p className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Booking link</p>
             <p
-              className="text-sm text-stone-700 truncate font-mono bg-stone-50 border border-stone-200 rounded-xl px-3 py-2"
+              className="text-xs sm:text-sm text-stone-700 truncate font-mono bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 min-w-0"
               title={salonUrl}
             >
               {salonUrl}
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Button
               variant="primary"
               onClick={handleShare}
               disabled={shareStatus === 'sharing'}
-              className="col-span-2 sm:col-span-1"
+              fullWidth
             >
-              <Share2 className="w-4 h-4" />
+              <Share2 className="w-4 h-4 shrink-0" />
               {shareStatus === 'sharing' ? 'Sharing...' : shareStatus === 'error' ? 'Try again' : 'Share'}
             </Button>
-            <Button variant="secondary" onClick={handleCopyLink} className="col-span-2 sm:col-span-1">
-              <Copy className="w-4 h-4" />
+            <Button variant="secondary" onClick={handleCopyLink} fullWidth>
+              <Copy className="w-4 h-4 shrink-0" />
               {copyLabel}
             </Button>
-            <Button variant="outline" onClick={handleDownload}>
-              <Download className="w-4 h-4" />
+            <Button variant="outline" onClick={handleDownload} fullWidth>
+              <Download className="w-4 h-4 shrink-0" />
               QR image
             </Button>
-            <Button variant="outline" onClick={handlePrint} disabled={printing}>
-              {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+            <Button variant="outline" onClick={handlePrint} disabled={printing} fullWidth>
+              {printing ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <Printer className="w-4 h-4 shrink-0" />}
               {printing ? 'Preparing...' : 'Print poster'}
             </Button>
           </div>
