@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { MapPin, Clock, Star, Calendar as CalendarIcon, CreditCard } from 'lucide-react';
 import { format, addDays, startOfToday, isSameDay } from 'date-fns';
@@ -10,6 +10,11 @@ export default function SalonDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, token } = useAuthStore();
+  const salonPath = `/salon/${id}`;
+
+  const redirectToAuth = () => {
+    navigate('/login', { state: { from: salonPath } });
+  };
   const [salon, setSalon] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
@@ -107,7 +112,7 @@ export default function SalonDetails() {
     setErrorMessage(null);
     setSuccessMessage(null);
     if (!user) {
-      navigate('/login');
+      redirectToAuth();
       return;
     }
     if (user.role !== 'CUSTOMER') {
@@ -300,11 +305,19 @@ export default function SalonDetails() {
                   <div>
                     <h3 className="font-bold text-stone-900 text-base md:text-lg">{service.name}</h3>
                     <p className="text-xs md:text-sm text-stone-500 mt-1">
-                      {getEffectiveVariant(service)?.duration ? `${getEffectiveVariant(service)?.duration} mins` : 'Duration depends on profile'}
+                      {!user
+                        ? 'Sign in for details'
+                        : getEffectiveVariant(service)?.duration
+                          ? `${getEffectiveVariant(service)?.duration} mins`
+                          : 'Duration depends on profile'}
                     </p>
                   </div>
                   <div className="font-bold text-stone-900 text-lg md:text-xl">
-                    {getEffectiveVariant(service)?.price ? `₹${getEffectiveVariant(service)?.price}` : 'Profile based'}
+                    {!user
+                      ? 'Sign in to see price'
+                      : getEffectiveVariant(service)?.price
+                        ? `₹${getEffectiveVariant(service)?.price}`
+                        : 'Profile based'}
                   </div>
                 </div>
               )})}
@@ -419,7 +432,27 @@ export default function SalonDetails() {
                   <label className="block text-sm font-bold text-stone-700 mb-4 flex items-center">
                     <Clock className="w-4 h-4 mr-2" /> Select Time
                   </label>
-                  {slotsLoading ? (
+                  {!user ? (
+                    <div className="text-center py-8 text-stone-600 bg-stone-50 rounded-2xl border border-dashed border-stone-200 text-sm px-4 space-y-3">
+                      <p>Sign in to see available time slots.</p>
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={redirectToAuth}
+                          className="px-4 py-2 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors"
+                        >
+                          Sign in
+                        </button>
+                        <Link
+                          to="/register"
+                          state={{ from: salonPath }}
+                          className="px-4 py-2 rounded-xl border border-stone-300 text-stone-800 font-semibold hover:bg-white transition-colors"
+                        >
+                          Sign up
+                        </Link>
+                      </div>
+                    </div>
+                  ) : slotsLoading ? (
                     <div className="flex justify-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stone-900"></div>
                     </div>
@@ -451,7 +484,20 @@ export default function SalonDetails() {
 
                 {/* Summary */}
                 <div className="bg-gradient-to-b from-stone-50 to-white p-5 md:p-6 rounded-2xl border border-stone-200/60">
-                  {!user?.gender && (
+                  {!user && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                      Please{' '}
+                      <button type="button" onClick={redirectToAuth} className="font-semibold underline hover:text-amber-900">
+                        sign in
+                      </button>
+                      {' '}or{' '}
+                      <Link to="/register" state={{ from: salonPath }} className="font-semibold underline hover:text-amber-900">
+                        create an account
+                      </Link>
+                      {' '}to see pricing and book your appointment.
+                    </p>
+                  )}
+                  {user && !user.gender && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
                       Please set your gender in profile to see final pricing and continue booking.
                     </p>
@@ -514,12 +560,32 @@ export default function SalonDetails() {
                 ) : (
                   <>
                     <button
-                      onClick={handleBook}
-                      disabled={!selectedTime || bookingLoading || (user && user.role !== 'CUSTOMER') || !user?.gender}
+                      onClick={!user ? redirectToAuth : handleBook}
+                      disabled={
+                        !user
+                          ? bookingLoading
+                          : !selectedTime || bookingLoading || user.role !== 'CUSTOMER' || !user.gender
+                      }
                       className="w-full bg-stone-900 text-white py-3.5 md:py-4 rounded-2xl font-bold text-base md:text-lg hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     >
-                      {bookingLoading ? 'Processing...' : (user && user.role !== 'CUSTOMER' ? 'Booking Restricted' : (!user?.gender ? 'Set Gender in Profile' : 'Book Appointment'))}
+                      {bookingLoading
+                        ? 'Processing...'
+                        : !user
+                          ? 'Sign in to Book'
+                          : user.role !== 'CUSTOMER'
+                            ? 'Booking Restricted'
+                            : !user.gender
+                              ? 'Set Gender in Profile'
+                              : 'Book Appointment'}
                     </button>
+                    {!user && (
+                      <p className="text-xs text-stone-500 text-center font-medium mt-2">
+                        New here?{' '}
+                        <Link to="/register" state={{ from: salonPath }} className="text-stone-900 font-semibold hover:underline">
+                          Create an account
+                        </Link>
+                      </p>
+                    )}
                     {user && user.role !== 'CUSTOMER' && (
                       <p className="text-xs text-red-500 text-center font-medium mt-2">
                         Only customer accounts can book services.
