@@ -1263,9 +1263,13 @@ export async function createApp() {
     ? path.join('/tmp', 'uploads')
     : path.join(process.cwd(), 'uploads');
   const salonUploadsDir = path.join(uploadsRoot, 'salons');
+  const avatarUploadsDir = path.join(uploadsRoot, 'avatars');
 
   if (!fs.existsSync(salonUploadsDir)) {
     fs.mkdirSync(salonUploadsDir, { recursive: true });
+  }
+  if (!fs.existsSync(avatarUploadsDir)) {
+    fs.mkdirSync(avatarUploadsDir, { recursive: true });
   }
 
   const salonImageUpload = multer({
@@ -1280,6 +1284,24 @@ export async function createApp() {
       fileSize: 15 * 1024 * 1024,
       files: 20,
     },
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only image files are allowed'));
+      }
+    },
+  });
+
+  const userAvatarUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, avatarUploadsDir),
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname) || '.jpg';
+        cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
     fileFilter: (_req, file, cb) => {
       if (file.mimetype.startsWith('image/')) {
         cb(null, true);
@@ -1370,7 +1392,7 @@ export async function createApp() {
       });
       res.json({
         token,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender, avatarUrl: user.avatarUrl },
       });
     } catch (error) {
       res.status(500).json({ error: 'Registration failed' });
@@ -1406,7 +1428,7 @@ export async function createApp() {
       });
       res.json({
         token,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender },
+        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender, avatarUrl: user.avatarUrl },
       });
     } catch (error) {
       res.status(500).json({ error: 'Login failed' });
@@ -2383,10 +2405,97 @@ export async function createApp() {
         where: { id: req.user.userId },
         data: { name, phone, gender: normalizedGender as UserGender | null }
       });
-      res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender });
+      res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender, avatarUrl: user.avatarUrl });
     } catch (error) {
       console.error('Error updating profile:', error);
       res.status(500).json({ error: 'Failed to update profile' });
+    }
+  });
+
+  // Upload user avatar
+  app.post('/api/users/avatar', requireAuth, (req: Request, res: Response) => {
+    userAvatarUpload.single('avatar')(req, res, async (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Avatar must be 5MB or smaller' });
+        }
+        return res.status(400).json({ error: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ error: err.message || 'Upload failed' });
+      }
+
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ error: 'No image uploaded' });
+      }
+
+      try {
+        let newAvatarUrl: string;
+        const supabaseAdmin = getSupabaseAdminClient();
+
+        if (supabaseAdmin) {
+          const ext = path.extname(file.originalname) || '.jpg';
+          const objectPath = `avatars/${req.user.userId}-${Date.now()}${ext}`;
+          const fileBuffer = await fs.promises.readFile(file.path);
+
+          const { error: uploadError } = await supabaseAdmin.storage
+            .from(SUPABASE_STORAGE_BUCKET)
+            .upload(objectPath, fileBuffer, {
+              contentType: file.mimetype || 'image/jpeg',
+              upsert: true,
+            });
+
+          if (uploadError) throw new Error(uploadError.message);
+
+          const { data } = supabaseAdmin.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(objectPath);
+          newAvatarUrl = data.publicUrl;
+        } else {
+          newAvatarUrl = `/uploads/avatars/${file.filename}`;
+        }
+
+        const user = await prisma.user.update({
+          where: { id: req.user.userId },
+          data: { avatarUrl: newAvatarUrl },
+        });
+
+        return res.json({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone,
+          gender: user.gender,
+          avatarUrl: user.avatarUrl,
+        });
+      } catch (uploadError: any) {
+        return res.status(500).json({ error: uploadError?.message || 'Failed to upload avatar' });
+      } finally {
+        if (file.path) {
+          try { await fs.promises.unlink(file.path); } catch {}
+        }
+      }
+    });
+  });
+
+  // Remove user avatar
+  app.delete('/api/users/avatar', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await prisma.user.update({
+        where: { id: req.user.userId },
+        data: { avatarUrl: null },
+      });
+      return res.json({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        gender: user.gender,
+        avatarUrl: user.avatarUrl,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'Failed to remove avatar' });
     }
   });
 

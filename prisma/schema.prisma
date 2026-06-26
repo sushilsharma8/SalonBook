@@ -32,6 +32,7 @@ model User {
   gender    UserGender?
   email     String?  @unique
   password  String   @default("")
+  avatarUrl String?
   isActive  Boolean  @default(true)
   noShowCount Int    @default(0)
   createdAt DateTime @default(now())
