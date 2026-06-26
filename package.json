@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch --tsconfig tsconfig.server.json server.ts",
     "build": "vite build",
-    "vercel-build": "prisma generate && npm run build",
+    "vercel-build": "prisma generate && prisma migrate deploy && npm run build",
     "start": "tsx --tsconfig tsconfig.server.json server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",

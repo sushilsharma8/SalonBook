@@ -1255,6 +1255,26 @@ async function createBooking(prisma: PrismaClient, data: any) {
   });
 }
 
+const IMAGE_UPLOAD_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']);
+
+function imageUploadFileFilter(
+  _req: Request,
+  file: Express.Multer.File,
+  cb: multer.FileFilterCallback,
+) {
+  const mime = (file.mimetype || '').toLowerCase();
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  if (
+    mime.startsWith('image/') ||
+    mime === 'application/octet-stream' ||
+    IMAGE_UPLOAD_EXTENSIONS.has(ext)
+  ) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed'));
+  }
+}
+
 export async function createApp() {
   const app = express();
   // Serverless runtimes (e.g. Vercel) expose a read-only app directory.
@@ -1284,13 +1304,7 @@ export async function createApp() {
       fileSize: 15 * 1024 * 1024,
       files: 20,
     },
-    fileFilter: (_req, file, cb) => {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only image files are allowed'));
-      }
-    },
+    fileFilter: imageUploadFileFilter,
   });
 
   const userAvatarUpload = multer({
@@ -1302,13 +1316,7 @@ export async function createApp() {
       },
     }),
     limits: { fileSize: 5 * 1024 * 1024, files: 1 },
-    fileFilter: (_req, file, cb) => {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only image files are allowed'));
-      }
-    },
+    fileFilter: imageUploadFileFilter,
   });
 
   app.use(cors());
@@ -2436,7 +2444,7 @@ export async function createApp() {
 
         if (supabaseAdmin) {
           const ext = path.extname(file.originalname) || '.jpg';
-          const objectPath = `avatars/${req.user.userId}-${Date.now()}${ext}`;
+          const objectPath = `${SUPABASE_STORAGE_FOLDER}/avatars/${req.user.userId}-${Date.now()}${ext}`;
           const fileBuffer = await fs.promises.readFile(file.path);
 
           const { error: uploadError } = await supabaseAdmin.storage
