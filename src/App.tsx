@@ -10,7 +10,6 @@ import { lazyWithRetry } from './lib/lazyWithRetry';
 import { identifyUser, resetAnalytics } from './lib/analytics';
 import { AnalyticsProvider } from './components/AnalyticsProvider';
 import ToastContainer from './components/ui/Toast';
-import PwaInstallBanner from './components/PwaInstallBanner';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -112,6 +111,12 @@ function AppShell() {
   );
 }
 
+function LandingRoute() {
+  const { user } = useAuthStore();
+  if (user) return <Navigate to="/explore" replace />;
+  return <Landing />;
+}
+
 function AuthAnalyticsSync() {
   const { user } = useAuthStore();
   useEffect(() => {
@@ -130,10 +135,9 @@ export default function App() {
       <AuthAnalyticsSync />
       <AnalyticsProvider>
         <ToastContainer />
-        <PwaInstallBanner />
         <Suspense fallback={<RouteFallback />}>
           <Routes>
-            <Route path="/" element={<Landing />} />
+            <Route path="/" element={<LandingRoute />} />
             <Route path="*" element={<AppShell />} />
           </Routes>
         </Suspense>

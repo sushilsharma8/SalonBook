@@ -10,10 +10,12 @@ import BusinessCta from '../components/landing/BusinessCta';
 import Faq from '../components/landing/Faq';
 import CtaBanner from '../components/landing/CtaBanner';
 import LandingFooter from '../components/landing/LandingFooter';
+import PwaInstallBanner from '../components/PwaInstallBanner';
 
 export default function Landing() {
   return (
     <div className="min-h-screen bg-stone-50">
+      <PwaInstallBanner />
       <LandingNav />
       <main>
         <Hero />

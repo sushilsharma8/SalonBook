@@ -33,7 +33,7 @@ export default function Login() {
       if (redirectTo) {
         navigate(redirectTo);
       } else {
-        navigate(data.user.role === 'CUSTOMER' ? '/' : `/dashboard/${data.user.role.toLowerCase()}`);
+        navigate(data.user.role === 'CUSTOMER' ? '/explore' : `/dashboard/${data.user.role.toLowerCase()}`);
       }
     } catch (err: any) {
       setError(err.message);
