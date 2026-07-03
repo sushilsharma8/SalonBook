@@ -36,3 +36,42 @@ See `package.json` scripts and `README.md` for the full list. Highlights:
 - `GEMINI_API_KEY` and `GOOGLE_MAPS_PLATFORM_KEY` are optional; the app degrades gracefully without them. When set, `GEMINI_API_KEY` also enables menu photo extraction for sellers (`POST /api/seller/services/extract-from-menu`) and admins (`POST /api/admin/salons/:id/services/extract-from-menu`). Menu OCR auto-falls back across `gemini-2.5-flash` then `gemini-3.5-flash` (override with `GEMINI_MENU_MODEL` / `GEMINI_MENU_MODELS`).
 - There are no automated test suites in this project; validation is done via `npm run lint` (TypeScript check) and manual testing.
 - **Booking times are India-local wall clock** (primary market is India). Slot times, salon hours, and persisted `startTime` values all use local HH:mm; the ISO string stores that wall clock in the UTC fields (e.g. 11:00 AM → `T11:00:00.000Z`). Use `src/lib/bookingTime.ts` helpers for display and comparisons — never `format(new Date(booking.startTime), …)` which applies a timezone offset and shows the wrong time in IST.
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
+- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
+- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
+- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview` + `list_communities`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+| ------ | ---------- |
+| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
+| `get_review_context` | Need source snippets for review — token-efficient |
+| `get_impact_radius` | Understanding blast radius of a change |
+| `get_affected_flows` | Finding which execution paths are impacted |
+| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes` | Finding functions/classes by name or keyword |
+| `get_architecture_overview` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes` for code review.
+3. Use `get_affected_flows` to understand impact.
+4. Use `query_graph` pattern="tests_for" to check coverage.

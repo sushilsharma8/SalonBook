@@ -15,6 +15,7 @@ import { GoogleGenAI } from '@google/genai';
 import ws from 'ws';
 import posthog from './src/lib/posthog-server.js';
 import { bookingTimeMs, isBookingUpcoming, nowBookingTimeMs } from './src/lib/bookingTime.js';
+import { getSellerSubscriptionSummary } from './src/lib/sellerSubscription.js';
 
 dotenv.config();
 
@@ -1369,6 +1370,14 @@ export async function createApp() {
         return res.status(400).json({ error: 'Email already in use' });
       }
       const hashedPassword = await bcrypt.hash(password, 10);
+      const sellerDefaults =
+        normalizedRole === 'SELLER'
+          ? {
+              sellerSignupSource: 'MANUAL' as const,
+              sellerSubscriptionStatus: 'PAST_DUE' as const,
+              trialEndsAt: null,
+            }
+          : {};
       const user = await prisma.user.create({
         data: {
           name,
@@ -1377,6 +1386,7 @@ export async function createApp() {
           role: normalizedRole,
           phone,
           gender: normalizedRole === 'CUSTOMER' ? (normalizedGender as UserGender | undefined) ?? null : null,
+          ...sellerDefaults,
         },
       });
       const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET);
@@ -1400,7 +1410,16 @@ export async function createApp() {
       });
       res.json({
         token,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender, avatarUrl: user.avatarUrl },
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone,
+          gender: user.gender,
+          avatarUrl: user.avatarUrl,
+          sellerSubscription: getSellerSubscriptionSummary(user),
+        },
       });
     } catch (error) {
       res.status(500).json({ error: 'Registration failed' });
@@ -1436,7 +1455,16 @@ export async function createApp() {
       });
       res.json({
         token,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, gender: user.gender, avatarUrl: user.avatarUrl },
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone,
+          gender: user.gender,
+          avatarUrl: user.avatarUrl,
+          sellerSubscription: getSellerSubscriptionSummary(user),
+        },
       });
     } catch (error) {
       res.status(500).json({ error: 'Login failed' });
@@ -1569,6 +1597,17 @@ export async function createApp() {
       res.json(salon || null);
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch salon' });
+    }
+  });
+
+  app.get('/api/seller/subscription', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'SELLER') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      res.json(getSellerSubscriptionSummary(user));
+    } catch {
+      res.status(500).json({ error: 'Failed to fetch subscription' });
     }
   });
 

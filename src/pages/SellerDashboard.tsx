@@ -59,6 +59,11 @@ export default function SellerDashboard() {
   const { token, user } = useAuthStore();
   const [salon, setSalon] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [subscription, setSubscription] = useState<{
+    onTrial?: boolean;
+    needsPayment?: boolean;
+    message?: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   
@@ -100,9 +105,10 @@ export default function SellerDashboard() {
   const fetchData = async () => {
     try {
       setFetchError(null);
-      const [salonRes, bookingsRes] = await Promise.all([
+      const [salonRes, bookingsRes, subscriptionRes] = await Promise.all([
         fetch('/api/seller/salon', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/seller/bookings', { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch('/api/seller/bookings', { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch('/api/seller/subscription', { headers: { 'Authorization': `Bearer ${token}` } }),
       ]);
       
       const fullSalon = await salonRes.json();
@@ -133,6 +139,13 @@ export default function SellerDashboard() {
       const bookingsData = await bookingsRes.json();
       if (!bookingsRes.ok) throw new Error(bookingsData.error || 'Failed to fetch bookings');
       setBookings(Array.isArray(bookingsData) ? bookingsData : []);
+
+      if (subscriptionRes.ok) {
+        setSubscription(await subscriptionRes.json());
+      } else {
+        setSubscription(null);
+      }
+
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -575,6 +588,17 @@ export default function SellerDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
+      {subscription?.message && (
+        <div
+          className={`rounded-2xl border px-5 py-4 text-sm font-medium ${
+            subscription.onTrial
+              ? 'bg-green-50 border-green-200 text-green-900'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+        >
+          {subscription.message}
+        </div>
+      )}
       <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
           <Scissors className="w-48 h-48 transform rotate-12" />
