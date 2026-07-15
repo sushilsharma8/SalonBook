@@ -69,6 +69,11 @@ model Salon {
   closeTime  String
   images     String?
   categories String?
+  source     String?
+  sourceUrl  String?
+  listedPhone String?
+  claimedAt  DateTime?
+  claimToken String?  @unique
   createdAt  DateTime @default(now())
 
   featured   Boolean  @default(false)
@@ -78,6 +83,8 @@ model Salon {
   bookings   Booking[]
   reviews    Review[]
   hours      SalonHours[]
+
+  @@index([claimedAt])
 }
 
 model SalonHours {

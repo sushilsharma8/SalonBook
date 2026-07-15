@@ -15,7 +15,12 @@ import { GoogleGenAI } from '@google/genai';
 import ws from 'ws';
 import posthog from './src/lib/posthog-server.js';
 import { bookingTimeMs, isBookingUpcoming, nowBookingTimeMs } from './src/lib/bookingTime.js';
-import { getSellerSubscriptionSummary } from './src/lib/sellerSubscription.js';
+import {
+  getSellerSubscriptionSummary,
+  inviteClaimSellerSignupDefaults,
+  manualSellerSignupDefaults,
+} from './src/lib/sellerSubscription.js';
+import { sendOwnerNotification } from './src/lib/ownerNotification.js';
 
 dotenv.config();
 
@@ -43,6 +48,9 @@ const DEFAULT_GEMINI_MENU_MODEL_CHAIN = [
   'gemini-3.5-flash',
 ] as const;
 const GOOGLE_MAPS_PLATFORM_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY;
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL;
+const APP_BASE_URL = process.env.APP_URL || 'http://localhost:3000';
+const SYSTEM_SELLER_EMAIL = 'system@salonbook.internal';
 
 function getGeminiMenuModelChain(): string[] {
   const fromList = process.env.GEMINI_MENU_MODELS;
@@ -85,6 +93,59 @@ async function geocodeSalonAddress(
   }
 
   return null;
+}
+
+function maskIndianPhone(phone?: string | null): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) return null;
+  return `******${digits.slice(-4)}`;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      const next = line[i + 1];
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === ',' && !inQuotes) {
+      out.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  out.push(current.trim());
+  return out;
+}
+
+function parseCsv(text: string): Array<Record<string, string>> {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map((header) => header.toLowerCase());
+  const rows: Array<Record<string, string>> = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const values = parseCsvLine(lines[i]);
+    const row: Record<string, string> = {};
+    headers.forEach((header, idx) => {
+      row[header] = values[idx] ?? '';
+    });
+    rows.push(row);
+  }
+  return rows;
 }
 
 let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
@@ -1319,6 +1380,10 @@ export async function createApp() {
     limits: { fileSize: 5 * 1024 * 1024, files: 1 },
     fileFilter: imageUploadFileFilter,
   });
+  const csvUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 2 * 1024 * 1024 },
+  });
 
   app.use(cors());
   app.use(express.json({ limit: '25mb' }));
@@ -1372,11 +1437,7 @@ export async function createApp() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const sellerDefaults =
         normalizedRole === 'SELLER'
-          ? {
-              sellerSignupSource: 'MANUAL' as const,
-              sellerSubscriptionStatus: 'PAST_DUE' as const,
-              trialEndsAt: null,
-            }
+          ? manualSellerSignupDefaults()
           : {};
       const user = await prisma.user.create({
         data: {
@@ -1494,11 +1555,117 @@ export async function createApp() {
     }
   };
 
+  app.get('/api/claim/:token', async (req: Request, res: Response) => {
+    try {
+      const token = String(req.params.token || '').trim();
+      if (!token) return res.status(400).json({ error: 'Invalid claim token' });
+      const salon = await prisma.salon.findFirst({
+        where: { claimToken: token },
+        select: { id: true, name: true, address: true, claimedAt: true, listedPhone: true },
+      });
+      if (!salon) return res.status(404).json({ error: 'Claim link not found or expired' });
+      if (salon.claimedAt) return res.status(410).json({ error: 'This salon is already claimed' });
+      return res.json({
+        salon: {
+          id: salon.id,
+          name: salon.name,
+          address: salon.address,
+          listedPhoneMasked: maskIndianPhone(salon.listedPhone),
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Failed to load claim link' });
+    }
+  });
+
+  app.post('/api/claim/:token', async (req: Request, res: Response) => {
+    try {
+      const token = String(req.params.token || '').trim();
+      const { name, email, password } = req.body as { name?: string; email?: string; password?: string };
+      if (!token) return res.status(400).json({ error: 'Invalid claim token' });
+      if (!name || String(name).trim().length < 2) return res.status(400).json({ error: 'Name must be at least 2 characters' });
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) return res.status(400).json({ error: 'Enter a valid email address' });
+      if (!password || String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+      const existing = await prisma.user.findUnique({ where: { email: String(email).trim() } });
+      if (existing) return res.status(400).json({ error: 'Email already in use. Please use a different email for claim.' });
+
+      const result = await prisma.$transaction(async (tx) => {
+        const salon = await tx.salon.findFirst({
+          where: { claimToken: token },
+          select: { id: true, name: true, listedPhone: true, claimedAt: true },
+        });
+        if (!salon) throw new Error('CLAIM_NOT_FOUND');
+        if (salon.claimedAt) throw new Error('CLAIM_ALREADY_USED');
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = await tx.user.create({
+          data: {
+            name: String(name).trim(),
+            email: String(email).trim(),
+            phone: salon.listedPhone || null,
+            password: hashedPassword,
+            role: 'SELLER',
+            ...inviteClaimSellerSignupDefaults(),
+          },
+        });
+
+        await tx.salon.update({
+          where: { id: salon.id },
+          data: {
+            ownerId: user.id,
+            claimedAt: new Date(),
+            claimToken: null,
+          },
+        });
+
+        return user;
+      });
+
+      const jwtToken = jwt.sign({ userId: result.id, role: result.role }, JWT_SECRET);
+      return res.json({
+        token: jwtToken,
+        user: {
+          id: result.id,
+          name: result.name,
+          email: result.email,
+          role: result.role,
+          phone: result.phone,
+          gender: result.gender,
+          avatarUrl: result.avatarUrl,
+          sellerSubscription: getSellerSubscriptionSummary(result),
+        },
+      });
+    } catch (error: any) {
+      if (error?.message === 'CLAIM_NOT_FOUND') return res.status(404).json({ error: 'Claim link not found or expired' });
+      if (error?.message === 'CLAIM_ALREADY_USED') return res.status(410).json({ error: 'This salon is already claimed' });
+      console.error(error);
+      return res.status(500).json({ error: 'Claim failed' });
+    }
+  });
+
   // Salons
   let salonsListCache: { data: unknown[]; expiresAt: number; cacheKey: string } | null = null;
   const SALONS_LIST_TTL_MS = 30_000;
   const invalidateSalonsListCache = () => {
     salonsListCache = null;
+  };
+
+  const getOrCreateSystemSeller = async () => {
+    const existing = await prisma.user.findUnique({ where: { email: SYSTEM_SELLER_EMAIL } });
+    if (existing) return existing;
+    const password = await bcrypt.hash(crypto.randomUUID(), 10);
+    return prisma.user.create({
+      data: {
+        name: 'SalonBook System',
+        email: SYSTEM_SELLER_EMAIL,
+        phone: null,
+        password,
+        role: 'SELLER',
+        ...manualSellerSignupDefaults(),
+      },
+    });
   };
 
   app.get('/api/salons', async (req: Request, res: Response) => {
@@ -1563,9 +1730,6 @@ export async function createApp() {
           reviews: {
             include: { user: { select: { name: true } } },
             orderBy: { createdAt: 'desc' }
-          },
-          owner: {
-            select: { name: true, phone: true }
           }
         }
       });
@@ -2203,6 +2367,32 @@ export async function createApp() {
         duration: totalDuration,
         totalAmount: totalPrice
       });
+
+      const bookedSalon = await prisma.salon.findUnique({
+        where: { id: salonId },
+        select: { name: true, listedPhone: true, claimToken: true, claimedAt: true },
+      });
+      if (bookedSalon && !bookedSalon.claimedAt) {
+        const bookingDateLabel = new Date(time).toLocaleString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+        void sendOwnerNotification({
+          whatsappApiUrl: WHATSAPP_API_URL,
+          appBaseUrl: APP_BASE_URL,
+          salonName: bookedSalon.name,
+          listedPhone: bookedSalon.listedPhone,
+          claimToken: bookedSalon.claimToken,
+          bookingDateLabel,
+          serviceNames: resolvedServices.map((service) => service.serviceName),
+        }).catch((notifyError) => {
+          console.error('Owner notification failed:', notifyError);
+        });
+      }
+
       posthog.capture({
         distinctId: req.user.userId,
         event: 'booking_created',
@@ -2663,6 +2853,145 @@ export async function createApp() {
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch salons' });
     }
+  });
+
+  app.post('/api/admin/salons', requireAuth, async (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    const { name, address, openTime, closeTime, categories, images, listedPhone, source, sourceUrl } = req.body;
+    if (!name || !address || !openTime || !closeTime) {
+      return res.status(400).json({ error: 'name, address, openTime, and closeTime are required' });
+    }
+    try {
+      const systemSeller = await getOrCreateSystemSeller();
+      const coords = await geocodeSalonAddress(address, name);
+      const salon = await prisma.salon.create({
+        data: {
+          ownerId: systemSeller.id,
+          name,
+          address,
+          openTime,
+          closeTime,
+          categories: categories ?? null,
+          images: images ?? null,
+          listedPhone: listedPhone ? String(listedPhone).replace(/\D/g, '') : null,
+          source: source ?? null,
+          sourceUrl: sourceUrl ?? null,
+          claimToken: crypto.randomBytes(24).toString('hex'),
+          claimedAt: null,
+          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+        },
+      });
+      await ensureSalonDefaultStaff(prisma, salon.id);
+      invalidateSalonsListCache();
+      res.status(201).json(salon);
+    } catch (error) {
+      console.error('Error creating admin unclaimed salon:', error);
+      res.status(500).json({ error: 'Failed to create salon' });
+    }
+  });
+
+  app.post('/api/admin/salons/import/csv', requireAuth, (req: Request, res: Response) => {
+    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+    csvUpload.single('file')(req, res, async (err) => {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ error: 'Invalid CSV upload request' });
+      }
+      try {
+        const csvText = req.file?.buffer?.toString('utf8') || String(req.body?.csv || '');
+        if (!csvText.trim()) {
+          return res.status(400).json({ error: 'Upload a CSV file or provide csv text in body' });
+        }
+
+        const rows = parseCsv(csvText);
+        if (!rows.length) {
+          return res.status(400).json({ error: 'CSV must include header and at least one row' });
+        }
+
+        const requiredHeaders = ['name', 'address'];
+        const headerSet = new Set(Object.keys(rows[0]).map((key) => key.toLowerCase()));
+        const missing = requiredHeaders.filter((header) => !headerSet.has(header));
+        if (missing.length > 0) {
+          return res.status(400).json({ error: `Missing required CSV columns: ${missing.join(', ')}` });
+        }
+
+        const systemSeller = await getOrCreateSystemSeller();
+        const created: Array<{ id: string; name: string }> = [];
+        const skipped: Array<{ row: number; reason: string; name?: string }> = [];
+        const seenBatch = new Set<string>();
+
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index];
+          const rowNumber = index + 2;
+          const name = String(row.name || '').trim();
+          const address = String(row.address || '').trim();
+          const openTime = String(row.opentime || row.open_time || '10:00').trim() || '10:00';
+          const closeTime = String(row.closetime || row.close_time || '20:00').trim() || '20:00';
+          const listedPhone = String(row.listedphone || row.listed_phone || '').replace(/\D/g, '');
+          const source = String(row.source || 'CSV_IMPORT').trim() || 'CSV_IMPORT';
+          const sourceUrl = String(row.sourceurl || row.source_url || '').trim() || null;
+          const categories = String(row.categories || '').trim() || null;
+          const images = String(row.images || '').trim() || null;
+
+          if (!name || !address) {
+            skipped.push({ row: rowNumber, reason: 'Missing name or address', name });
+            continue;
+          }
+
+          const dedupeKey = `${name.toLowerCase()}::${address.toLowerCase()}`;
+          if (seenBatch.has(dedupeKey)) {
+            skipped.push({ row: rowNumber, reason: 'Duplicate in same CSV', name });
+            continue;
+          }
+          seenBatch.add(dedupeKey);
+
+          const existing = await prisma.salon.findFirst({
+            where: { name: { equals: name, mode: 'insensitive' }, address: { equals: address, mode: 'insensitive' } },
+            select: { id: true },
+          });
+          if (existing) {
+            skipped.push({ row: rowNumber, reason: 'Already exists', name });
+            continue;
+          }
+
+          const coords = await geocodeSalonAddress(address, name);
+          const salon = await prisma.salon.create({
+            data: {
+              ownerId: systemSeller.id,
+              name,
+              address,
+              openTime,
+              closeTime,
+              listedPhone: listedPhone || null,
+              source,
+              sourceUrl,
+              categories,
+              images,
+              claimToken: crypto.randomBytes(24).toString('hex'),
+              claimedAt: null,
+              ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+            },
+            select: { id: true, name: true },
+          });
+          await ensureSalonDefaultStaff(prisma, salon.id);
+          created.push(salon);
+        }
+
+        invalidateSalonsListCache();
+        return res.status(201).json({
+          totalRows: rows.length,
+          createdCount: created.length,
+          skippedCount: skipped.length,
+          created,
+          skipped,
+        });
+      } catch (error: any) {
+        console.error('CSV import failed:', error);
+        return res.status(500).json({ error: error?.message || 'Failed to import CSV' });
+      }
+    });
   });
 
   // Admin: Delete salon

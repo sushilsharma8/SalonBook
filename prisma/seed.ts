@@ -55,6 +55,16 @@ async function main() {
     },
   });
 
+  const systemSeller = await prisma.user.create({
+    data: {
+      name: 'SalonBook System',
+      email: 'system@salonbook.internal',
+      phone: null,
+      password: hashedPassword,
+      role: 'SELLER',
+    },
+  });
+
   // 3. Create Salons
   const salon1 = await prisma.salon.create({
     data: {
@@ -81,6 +91,23 @@ async function main() {
       lng: -118.4912,
       categories: JSON.stringify({ primary: 'spa', related: ['massage', 'facial'] }),
       images: JSON.stringify(['https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&q=80&w=800']),
+    },
+  });
+
+  await prisma.salon.create({
+    data: {
+      name: 'Urban Trim Studio',
+      address: '221 MG Road, Indore',
+      ownerId: systemSeller.id,
+      openTime: '10:00',
+      closeTime: '20:00',
+      listedPhone: '9876543210',
+      source: 'SEED',
+      sourceUrl: 'https://example.com/urban-trim-studio',
+      claimToken: 'seed-claim-urban-trim',
+      claimedAt: null,
+      categories: JSON.stringify({ primary: 'hair', related: ['beard', 'styling'] }),
+      images: JSON.stringify(['https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?auto=format&fit=crop&q=80&w=800']),
     },
   });
 

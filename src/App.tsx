@@ -25,6 +25,7 @@ const AdminSalonManage = lazyWithRetry(() => import('./pages/AdminSalonManage'))
 const ContactUs = lazyWithRetry(() => import('./pages/ContactUs'));
 const TermsOfService = lazyWithRetry(() => import('./pages/TermsOfService'));
 const PrivacyPolicy = lazyWithRetry(() => import('./pages/PrivacyPolicy'));
+const Claim = lazyWithRetry(() => import('./pages/Claim'));
 
 function ProtectedRoute({
   children,
@@ -63,6 +64,7 @@ function AppShell() {
           <Route path="/contact" element={<ContactUs />} />
           <Route path="/terms" element={<TermsOfService />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/claim/:token" element={<Claim />} />
           <Route path="/salon/:id" element={<SalonDetails />} />
           <Route
             path="/booking/action/:token"

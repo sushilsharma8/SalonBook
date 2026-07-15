@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { Users, Scissors, Calendar, IndianRupee, Trash2, Shield, Settings, RotateCcw, KeyRound, Megaphone, Star } from 'lucide-react';
 import { Button } from '../components/ui/Button';
@@ -7,6 +7,7 @@ import { toast } from '../store/useToastStore';
 
 export default function AdminDashboard() {
   const { token } = useAuthStore();
+  const csvInputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats] = useState<any>({ users: 0, salons: 0, bookings: 0, revenue: 0 });
   const [activity, setActivity] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -21,6 +22,7 @@ export default function AdminDashboard() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState('');
+  const [importingCsv, setImportingCsv] = useState(false);
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -188,6 +190,44 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error(err);
       flash('error', 'Failed to delete salon');
+    }
+  };
+
+  const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImportingCsv(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/admin/salons/import/csv', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        flash('error', data?.error || 'CSV import failed');
+        return;
+      }
+
+      const salonsRes = await fetch('/api/admin/salons', { headers: { Authorization: `Bearer ${token}` } });
+      const salonsData = await salonsRes.json().catch(() => null);
+      if (salonsRes.ok && !salonsData?.error) {
+        setSalons(salonsData);
+        setStats((prev: any) => ({ ...prev, salons: salonsData.length }));
+      }
+
+      flash(
+        'success',
+        `Imported ${data?.createdCount ?? 0} salon(s); skipped ${data?.skippedCount ?? 0}.`,
+      );
+    } catch (error) {
+      console.error(error);
+      flash('error', 'CSV import failed');
+    } finally {
+      if (csvInputRef.current) csvInputRef.current.value = '';
+      setImportingCsv(false);
     }
   };
 
@@ -481,9 +521,28 @@ export default function AdminDashboard() {
 
       {activeTab === 'salons' && (
         <div className="bg-white p-6 md:p-10 rounded-[2rem] shadow-sm border border-stone-200/60 animate-in fade-in duration-500">
-          <h2 className="text-2xl font-bold text-stone-900 mb-8 font-display tracking-tight flex items-center">
-            <Scissors className="w-6 h-6 mr-3 text-stone-400" /> Manage Salons
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+            <h2 className="text-2xl font-bold text-stone-900 font-display tracking-tight flex items-center">
+              <Scissors className="w-6 h-6 mr-3 text-stone-400" /> Manage Salons
+            </h2>
+            <div className="flex items-center gap-3">
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleCsvImport}
+              />
+              <button
+                type="button"
+                disabled={importingCsv}
+                onClick={() => csvInputRef.current?.click()}
+                className="px-4 py-2.5 rounded-xl border border-stone-300 bg-stone-50 text-stone-800 text-sm font-bold hover:bg-stone-100 disabled:opacity-60"
+              >
+                {importingCsv ? 'Importing CSV...' : 'Import Salons CSV'}
+              </button>
+            </div>
+          </div>
           {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
